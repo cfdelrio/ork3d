@@ -8,8 +8,7 @@ cd "$(dirname "$0")"
 [[ -f .env ]] && source .env || { echo "No hay infra/.env, nada para borrar."; exit 1; }
 
 echo "Esto va a eliminar:"
-echo "  - Distribution apex:  ${DISTRIBUTION_ID:-?}"
-echo "  - Distribution www:   ${WWW_DISTRIBUTION_ID:-?}"
+echo "  - Distribution:       ${DISTRIBUTION_ID:-?}"
 echo "  - Bucket S3:          ${BUCKET:-?}  (y todo su contenido)"
 echo "  - Cert ACM:           ${CERT_ARN:-?}"
 read -rp "Escribí 'BORRAR' para confirmar: " ans
@@ -33,7 +32,7 @@ disable_and_delete() {
   echo "✓ Distribution ${id} eliminada."
 }
 
-disable_and_delete "${WWW_DISTRIBUTION_ID:-}"
+disable_and_delete "${WWW_DISTRIBUTION_ID:-}"  # legacy, may not exist
 disable_and_delete "${DISTRIBUTION_ID:-}"
 
 if [[ -n "${BUCKET:-}" ]]; then

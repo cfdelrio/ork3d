@@ -1,10 +1,12 @@
 # ORK3D · Landing
 
-Landing estática de **ork3d.com** (impresión 3D de trofeos, medallas, regalos corporativos y piezas personalizadas en Buenos Aires). Sin backend, sin DB, sin frameworks.
+Landing estática de **www.ork3d.com** (impresión 3D de trofeos, medallas, regalos corporativos y piezas personalizadas en Buenos Aires). Sin backend, sin DB, sin frameworks.
 
 ```
-HTML + CSS + JS vanilla → S3 (privado) → CloudFront (OAC) → ork3d.com
+HTML + CSS + JS vanilla → S3 (privado) → CloudFront (OAC) → www.ork3d.com
 ```
+
+> ⚠️ **Nota sobre el apex:** el dominio se sirve en `www.ork3d.com`. El apex (`ork3d.com` sin www) **no resuelve** porque el DNS de Donweb no soporta `ANAME`/`ALIAS` necesario para apuntar el apex a CloudFront. Para activar el apex hay que migrar la zona DNS a Cloudflare (gratis) o Route 53 (USD 0.50/mes).
 
 ---
 
