@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#a8782b"/></linearGradient>
+  </defs>
+  <!-- soccer boot -->
+  <path d="M30,120 L40,80 Q50,70 80,72 L150,90 Q175,100 175,125 L170,150 L30,150 Z" fill="url(#g)" stroke="#7d5c1f" stroke-width="2"/>
+  <path d="M40,150 L30,170 L170,170 L160,150 Z" fill="#1a1a1a"/>
+  <circle cx="65" cy="115" r="3" fill="#0a0a0a"/>
+  <circle cx="85" cy="115" r="3" fill="#0a0a0a"/>
+  <circle cx="105" cy="115" r="3" fill="#0a0a0a"/>
+  <circle cx="125" cy="115" r="3" fill="#0a0a0a"/>
+  <circle cx="145" cy="115" r="3" fill="#0a0a0a"/>
+  <text x="100" y="140" text-anchor="middle" fill="#0a0a0a" font-family="Inter,Arial" font-size="9" font-weight="900">GOL</text>
+  <rect x="50" y="170" width="100" height="14" fill="#0a0a0a"/>
+</svg>
