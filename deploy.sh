@@ -27,6 +27,7 @@ aws s3 sync . "s3://${BUCKET}" \
   --exclude "verify.sh" \
   --exclude "README.md" \
   --exclude ".gitignore" \
+  --exclude "claude.md" \
   --exclude "*.sh" \
   --exclude "*.md" \
   --cache-control "public, max-age=300" \

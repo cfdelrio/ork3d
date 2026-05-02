@@ -1,21 +1,17 @@
 #!/usr/bin/env bash
-# ORK3D · Setup AWS (one-time, simplificado para www-only).
+# ORK3D · Setup AWS (one-time, apex + www con DNS en Cloudflare).
 #
-# Sirve sólo www.ork3d.com. El apex (ork3d.com) NO se configura en este flujo
-# porque Donweb no soporta ANAME/ALIAS en el apex.
+# Sirve ork3d.com (canónico) y www.ork3d.com (redirige al apex con 301).
 #
 # Crea:
 #   - Bucket S3 privado: ork3d.com
-#   - OAC (Origin Access Control) para CloudFront
-#   - Certificado ACM en us-east-1 sólo para www.ork3d.com
-#   - 1 CloudFront distribution para www.ork3d.com
+#   - OAC (Origin Access Control)
+#   - Cert ACM en us-east-1 para ork3d.com + www.ork3d.com
+#   - CloudFront Function: redirige www → apex
+#   - 1 CloudFront distribution con ambos aliases (función asociada)
 #
-# Requisitos:
-#   - AWS CLI v2 (en CloudShell ya viene)
-#   - jq (en CloudShell ya viene)
-#
-# El script PAUSA después de pedir el cert ACM para que cargues el CNAME
-# de validación en Donweb antes de seguir.
+# Requiere DNS en Cloudflare (CNAME flattening en apex).
+# El script PAUSA tras pedir el cert para que cargues los CNAMEs en Cloudflare.
 
 set -euo pipefail
 
@@ -28,13 +24,14 @@ ACM_REGION="us-east-1"
 cd "$(dirname "$0")"
 
 echo "════════════════════════════════════════════════════════════"
-echo "  ORK3D · Setup de infraestructura AWS (www-only)"
+echo "  ORK3D · Setup de infraestructura AWS"
 echo "════════════════════════════════════════════════════════════"
-echo "  Sitio:       https://${WWW_DOMAIN}"
-echo "  Apex:        ${DOMAIN} → NO se configura (limitación Donweb)"
+echo "  Apex:        https://${DOMAIN}        (canónico)"
+echo "  www:         https://${WWW_DOMAIN} → 301 → apex"
 echo "  Bucket:      s3://${BUCKET}  (privado)"
 echo "  Región S3:   ${REGION}"
 echo "  Región ACM:  ${ACM_REGION}"
+echo "  DNS:         Cloudflare (CNAME flattening)"
 echo "════════════════════════════════════════════════════════════"
 read -rp "¿Continuar? (escribir 'si' para crear recursos): " ans
 [[ "$ans" == "si" ]] || { echo "Abortado."; exit 1; }
@@ -46,7 +43,7 @@ echo "→ Cuenta AWS: ${ACCOUNT_ID}"
 # 1) Bucket S3 privado
 # ────────────────────────────────────────────────────────────
 echo ""
-echo "[1/5] Bucket S3 privado ${BUCKET} ..."
+echo "[1/6] Bucket S3 privado ${BUCKET} ..."
 if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
   echo "    ya existe."
 else
@@ -68,17 +65,18 @@ aws s3api put-bucket-versioning --bucket "${BUCKET}" \
   --versioning-configuration Status=Enabled
 
 # ────────────────────────────────────────────────────────────
-# 2) Certificado ACM (us-east-1) sólo para www
+# 2) Certificado ACM (us-east-1) apex + www
 # ────────────────────────────────────────────────────────────
 echo ""
-echo "[2/5] Certificado ACM para ${WWW_DOMAIN} ..."
+echo "[2/6] Certificado ACM para ${DOMAIN} y ${WWW_DOMAIN} ..."
 CERT_ARN=$(aws acm list-certificates --region "${ACM_REGION}" \
-  --query "CertificateSummaryList[?DomainName=='${WWW_DOMAIN}'].CertificateArn | [0]" \
+  --query "CertificateSummaryList[?DomainName=='${DOMAIN}'].CertificateArn | [0]" \
   --output text)
 
 if [[ "${CERT_ARN}" == "None" || -z "${CERT_ARN}" ]]; then
   CERT_ARN=$(aws acm request-certificate --region "${ACM_REGION}" \
-    --domain-name "${WWW_DOMAIN}" \
+    --domain-name "${DOMAIN}" \
+    --subject-alternative-names "${WWW_DOMAIN}" \
     --validation-method DNS \
     --query CertificateArn --output text)
   echo "    Cert ARN: ${CERT_ARN}"
@@ -88,19 +86,18 @@ fi
 
 echo "    Cert ARN: ${CERT_ARN}"
 echo ""
-echo "    >>> CARGÁ ESTE CNAME EN DONWEB <<<"
+echo "    >>> CARGÁ ESTOS CNAMES EN CLOUDFLARE (Proxy: DNS only / nube gris) <<<"
 aws acm describe-certificate --region "${ACM_REGION}" --certificate-arn "${CERT_ARN}" \
   --query 'Certificate.DomainValidationOptions[].ResourceRecord.[Name,Type,Value]' \
   --output table
 
-read -rp "¿Cargaste el CNAME en Donweb y querés esperar la validación? (si/skip): " v
+read -rp "¿Cargaste los CNAMEs en Cloudflare y querés esperar la validación? (si/skip): " v
 if [[ "${v}" == "si" ]]; then
-  echo "    Esperando validación (puede tardar 5-30 min) ..."
+  echo "    Esperando validación (con Cloudflare suele ser 2-5 min) ..."
   aws acm wait certificate-validated --region "${ACM_REGION}" --certificate-arn "${CERT_ARN}"
   echo "    ✓ Certificado validado."
 else
-  echo "    Saltando espera. Vas a tener que correr el script de nuevo cuando valide,"
-  echo "    o crear la distribution manualmente."
+  echo "    Saltando espera. Re-corré el script cuando valide."
   exit 0
 fi
 
@@ -108,7 +105,7 @@ fi
 # 3) Origin Access Control (OAC)
 # ────────────────────────────────────────────────────────────
 echo ""
-echo "[3/5] Origin Access Control ..."
+echo "[3/6] Origin Access Control ..."
 OAC_ID=$(aws cloudfront list-origin-access-controls \
   --query "OriginAccessControlList.Items[?Name=='ork3d-oac'].Id | [0]" \
   --output text 2>/dev/null || echo "None")
@@ -125,17 +122,45 @@ fi
 echo "    OAC: ${OAC_ID}"
 
 # ────────────────────────────────────────────────────────────
-# 4) CloudFront distribution para www
+# 4) CloudFront Function (www → apex)
 # ────────────────────────────────────────────────────────────
 echo ""
-echo "[4/5] CloudFront distribution para ${WWW_DOMAIN} ..."
+echo "[4/6] CloudFront Function 'ork3d-redirect-www' ..."
+FN_NAME="ork3d-redirect-www"
+FN_EXISTS=$(aws cloudfront list-functions \
+  --query "FunctionList.Items[?Name=='${FN_NAME}'].Name | [0]" --output text 2>/dev/null || echo "None")
+
+if [[ "${FN_EXISTS}" == "None" || -z "${FN_EXISTS}" ]]; then
+  aws cloudfront create-function \
+    --name "${FN_NAME}" \
+    --function-config "Comment='Redirect www to apex',Runtime=cloudfront-js-2.0" \
+    --function-code fileb://redirect-www.js >/dev/null
+fi
+
+FN_ETAG=$(aws cloudfront describe-function --name "${FN_NAME}" --query 'ETag' --output text)
+aws cloudfront update-function \
+  --name "${FN_NAME}" \
+  --if-match "${FN_ETAG}" \
+  --function-config "Comment='Redirect www to apex',Runtime=cloudfront-js-2.0" \
+  --function-code fileb://redirect-www.js >/dev/null
+FN_ETAG=$(aws cloudfront describe-function --name "${FN_NAME}" --query 'ETag' --output text)
+aws cloudfront publish-function --name "${FN_NAME}" --if-match "${FN_ETAG}" >/dev/null
+FN_ARN=$(aws cloudfront describe-function --name "${FN_NAME}" --stage LIVE \
+  --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
+echo "    Function ARN: ${FN_ARN}"
+
+# ────────────────────────────────────────────────────────────
+# 5) CloudFront distribution (sirve ambos aliases)
+# ────────────────────────────────────────────────────────────
+echo ""
+echo "[5/6] CloudFront distribution para ${DOMAIN} + ${WWW_DOMAIN} ..."
 CFG=$(mktemp)
 cat > "${CFG}" <<JSON
 {
-  "CallerReference": "ork3d-www-$(date +%s)",
-  "Comment": "ORK3D www site",
+  "CallerReference": "ork3d-$(date +%s)",
+  "Comment": "ORK3D apex + www",
   "Enabled": true,
-  "Aliases": { "Quantity": 1, "Items": ["${WWW_DOMAIN}"] },
+  "Aliases": { "Quantity": 2, "Items": ["${DOMAIN}", "${WWW_DOMAIN}"] },
   "DefaultRootObject": "index.html",
   "PriceClass": "PriceClass_100",
   "HttpVersion": "http2",
@@ -157,7 +182,11 @@ cat > "${CFG}" <<JSON
     "AllowedMethods": { "Quantity": 2, "Items": ["GET","HEAD"], "CachedMethods": { "Quantity": 2, "Items": ["GET","HEAD"] } },
     "Compress": true,
     "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
-    "ResponseHeadersPolicyId": "67f7725c-6f97-4210-82d7-5512b31e9d03"
+    "ResponseHeadersPolicyId": "67f7725c-6f97-4210-82d7-5512b31e9d03",
+    "FunctionAssociations": {
+      "Quantity": 1,
+      "Items": [{ "FunctionARN": "${FN_ARN}", "EventType": "viewer-request" }]
+    }
   },
   "CustomErrorResponses": {
     "Quantity": 2,
@@ -182,10 +211,10 @@ echo "    Distribution ID:    ${DIST_ID}"
 echo "    Distribution domain: ${DIST_DOMAIN}"
 
 # ────────────────────────────────────────────────────────────
-# 5) Bucket policy (sólo CloudFront vía OAC)
+# 6) Bucket policy (sólo CloudFront vía OAC)
 # ────────────────────────────────────────────────────────────
 echo ""
-echo "[5/5] Bucket policy ..."
+echo "[6/6] Bucket policy ..."
 POL=$(mktemp)
 sed -e "s|__BUCKET__|${BUCKET}|g" \
     -e "s|__ACCOUNT_ID__|${ACCOUNT_ID}|g" \
@@ -204,6 +233,7 @@ DISTRIBUTION_ID=${DIST_ID}
 DIST_DOMAIN=${DIST_DOMAIN}
 CERT_ARN=${CERT_ARN}
 OAC_ID=${OAC_ID}
+FN_ARN=${FN_ARN}
 ENV
 
 echo ""
@@ -211,16 +241,23 @@ echo "════════════════════════�
 echo "  ✓ Setup completo"
 echo "════════════════════════════════════════════════════════════"
 echo ""
-echo "DNS final que tenés que cargar en Donweb (Zona DNS):"
+echo "DNS final que tenés que cargar en CLOUDFLARE (Proxy: DNS only / nube gris):"
 echo ""
-echo "  Tipo: CNAME"
-echo "  Nombre: www"
-echo "  Contenido: ${DIST_DOMAIN}"
-echo "  TTL: 14400"
+echo "  1) Apex:"
+echo "     Type: CNAME"
+echo "     Name: @"
+echo "     Target: ${DIST_DOMAIN}"
+echo "     Proxy: DNS only (gris)"
 echo ""
-echo "(Si ya existe un CNAME para www apuntando a ork3d.com, EDITALO con este valor.)"
+echo "  2) www:"
+echo "     Type: CNAME"
+echo "     Name: www"
+echo "     Target: ${DIST_DOMAIN}"
+echo "     Proxy: DNS only (gris)"
 echo ""
-echo "Cuando el DNS propague, desde la raíz del repo corré:"
+echo "(Borrá el A 'ork3d.com → 192.0.2.1' antes de crear el CNAME apex.)"
+echo ""
+echo "Cuando los DNS propaguen, desde la raíz del repo corré:"
 echo "  ./deploy.sh"
-echo "  ./verify.sh www.ork3d.com"
+echo "  ./verify.sh"
 echo ""
