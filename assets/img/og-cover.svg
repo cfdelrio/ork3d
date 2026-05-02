@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0a0a"/>
+      <stop offset="100%" stop-color="#161616"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="70%" cy="50%"><stop offset="0%" stop-color="#c8ff1c" stop-opacity="0.25"/><stop offset="100%" stop-color="#c8ff1c" stop-opacity="0"/></radialGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#a8782b"/></linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <ellipse cx="900" cy="315" rx="500" ry="300" fill="url(#glow)"/>
+  <text x="80" y="200" font-family="Inter,Arial" font-size="84" font-weight="900" fill="#fff">ORK<tspan fill="#c8ff1c">3D</tspan></text>
+  <text x="80" y="290" font-family="Inter,Arial" font-size="42" font-weight="800" fill="#fff">Trofeos y objetos 3D</text>
+  <text x="80" y="340" font-family="Inter,Arial" font-size="42" font-weight="800" fill="#c8ff1c">personalizados.</text>
+  <text x="80" y="410" font-family="Inter,Arial" font-size="22" font-weight="500" fill="#b8b8b8">Diseño a medida · Producción local · Buenos Aires</text>
+
+  <!-- trophy -->
+  <g transform="translate(820,220)">
+    <path d="M40,30 Q5,60 30,140 Q70,160 95,150" stroke="url(#g)" stroke-width="14" fill="none" stroke-linecap="round"/>
+    <path d="M180,30 Q215,60 190,140 Q150,160 125,150" stroke="url(#g)" stroke-width="14" fill="none" stroke-linecap="round"/>
+    <path d="M45,20 L175,20 L165,170 Q110,200 55,170 Z" fill="url(#g)" stroke="#7d5c1f" stroke-width="2"/>
+    <rect x="90" y="190" width="40" height="20" fill="url(#g)"/>
+    <rect x="75" y="210" width="70" height="40" fill="#0a0a0a" stroke="#333" stroke-width="2"/>
+    <text x="110" y="237" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="14" font-weight="900">CAMPEÓN</text>
+  </g>
+</svg>

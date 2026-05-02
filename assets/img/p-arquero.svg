@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#a8782b"/></linearGradient>
+  </defs>
+  <!-- glove silhouette -->
+  <path d="M50,50 L140,40 L150,160 L100,180 L50,170 L40,90 Z" fill="#1a1a1a" stroke="#444" stroke-width="2"/>
+  <rect x="60" y="60" width="14" height="65" rx="4" fill="#2a2a2a"/>
+  <rect x="80" y="55" width="14" height="70" rx="4" fill="#2a2a2a"/>
+  <rect x="100" y="55" width="14" height="70" rx="4" fill="#2a2a2a"/>
+  <rect x="120" y="60" width="14" height="65" rx="4" fill="#2a2a2a"/>
+  <rect x="50" y="135" width="100" height="35" fill="url(#g)"/>
+  <text x="100" y="160" text-anchor="middle" fill="#0a0a0a" font-family="Inter,Arial" font-size="11" font-weight="900">ARQUERO</text>
+</svg>

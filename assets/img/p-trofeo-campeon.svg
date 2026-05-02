@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#a8782b"/></linearGradient>
+  </defs>
+  <path d="M55,140 Q35,170 50,178 L150,178 Q165,170 145,140 Z" fill="#1a1a1a" stroke="#333"/>
+  <path d="M40,40 Q15,60 35,110 Q55,130 70,125" stroke="url(#g)" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M160,40 Q185,60 165,110 Q145,130 130,125" stroke="url(#g)" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M45,40 L155,40 L145,140 Q100,160 55,140 Z" fill="url(#g)"/>
+  <rect x="80" y="155" width="40" height="14" fill="url(#g)"/>
+  <text x="100" y="172" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="8" font-weight="900">CAMPEÓN</text>
+</svg>

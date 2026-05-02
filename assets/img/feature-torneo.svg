@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 420">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#a8782b"/></linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#16a34a"/><stop offset="100%" stop-color="#052e16"/></linearGradient>
+    <radialGradient id="glow"><stop offset="0%" stop-color="#c8ff1c" stop-opacity="0.3"/><stop offset="100%" stop-color="#c8ff1c" stop-opacity="0"/></radialGradient>
+  </defs>
+  <!-- background field -->
+  <rect width="520" height="420" fill="url(#grass)" opacity="0.45"/>
+  <ellipse cx="260" cy="320" rx="240" ry="40" fill="#000" opacity="0.55"/>
+  <circle cx="260" cy="200" r="180" fill="url(#glow)"/>
+
+  <!-- field lines -->
+  <line x1="0" y1="280" x2="520" y2="280" stroke="#fff" stroke-opacity="0.15" stroke-width="2"/>
+  <line x1="0" y1="320" x2="520" y2="320" stroke="#fff" stroke-opacity="0.1" stroke-width="2"/>
+  <line x1="0" y1="360" x2="520" y2="360" stroke="#fff" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- main trophy -->
+  <g transform="translate(180,90)">
+    <path d="M30,40 Q5,70 25,140 Q50,165 75,160" stroke="url(#g)" stroke-width="14" fill="none" stroke-linecap="round"/>
+    <path d="M130,40 Q155,70 135,140 Q110,165 85,160" stroke="url(#g)" stroke-width="14" fill="none" stroke-linecap="round"/>
+    <path d="M35,30 L125,30 L115,170 Q80,195 45,170 Z" fill="url(#g)" stroke="#7d5c1f" stroke-width="2"/>
+    <rect x="65" y="190" width="30" height="14" fill="url(#g)"/>
+    <rect x="50" y="204" width="60" height="35" fill="#0a0a0a" stroke="#333"/>
+    <text x="80" y="225" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="10" font-weight="900">COPA DEL TORNEO</text>
+  </g>
+
+  <!-- side medals -->
+  <g transform="translate(60,200)">
+    <circle cx="40" cy="60" r="35" fill="url(#g)" stroke="#7d5c1f" stroke-width="2"/>
+    <circle cx="40" cy="60" r="24" fill="#0a0a0a"/>
+    <text x="40" y="65" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="11" font-weight="900">1°</text>
+  </g>
+  <g transform="translate(420,200)">
+    <circle cx="40" cy="60" r="35" fill="url(#g)" stroke="#7d5c1f" stroke-width="2"/>
+    <circle cx="40" cy="60" r="24" fill="#0a0a0a"/>
+    <text x="40" y="65" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="11" font-weight="900">MVP</text>
+  </g>
+</svg>
