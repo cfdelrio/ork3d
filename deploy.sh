@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ORK3D · Deploy: sync a S3 + invalidación de CloudFront.
 # Requiere haber corrido infra/setup.sh al menos una vez.
-# Variables: BUCKET, DISTRIBUTION_ID (se leen de infra/.env si existe)
+# Variables: BUCKET, DISTRIBUTION_ID (se leen de infra/.env si existe, o del entorno).
 
 set -euo pipefail
 
