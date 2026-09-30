@@ -314,10 +314,15 @@ button { font-family: inherit; cursor: pointer; }
   transform: translateY(-3px);
 }
 .card-fab__icon {
-  width: 40px; height: 40px;
+  width: 52px; height: 52px;
+  background: rgba(200,255,28,0.08);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--accent);
+  flex-shrink: 0;
 }
-.card-fab__icon svg { width: 100%; height: 100%; }
 .card-fab h3 {
   font-size: .95rem;
   font-weight: 700;
