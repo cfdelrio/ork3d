@@ -5,8 +5,11 @@ on:
     branches: [main]
     paths:
       - 'index.html'
+      - 'torneos.html'
       - 'error.html'
       - 'config.js'
+      - 'sitemap.xml'
+      - 'robots.txt'
       - 'assets/**'
       - 'deploy.sh'
       - '.github/workflows/deploy.yml'

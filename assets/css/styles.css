@@ -585,3 +585,239 @@ button { font-family: inherit; cursor: pointer; }
   * { transition: none !important; animation: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ============== TORNEOS HERO ============== */
+.hero--torneos { padding: 80px 0 90px; }
+.hero__copy--center { text-align: center; max-width: 760px; margin: 0 auto; }
+.hero__copy--center .hero__sub { margin-left: auto; margin-right: auto; }
+.hero__copy--center .hero__ctas { justify-content: center; }
+.hero__badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  border: 1px solid rgba(200,255,28,0.3);
+  border-radius: 999px;
+  padding: 5px 14px;
+  margin-bottom: 24px;
+}
+.hero__benefits {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 24px;
+  margin: 0 0 32px;
+}
+.hero__benefits li {
+  font-size: 14px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hero__benefits li::before {
+  content: '';
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.hero__microcopy {
+  font-size: 13px;
+  color: var(--text-mute);
+  margin: 16px 0 0;
+}
+
+/* ============== AWARD CARDS ============== */
+.award-card {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  transition: border-color .15s, transform .15s;
+}
+.award-card:hover {
+  border-color: rgba(200,255,28,0.3);
+  transform: translateY(-3px);
+}
+.award-card__icon {
+  width: 48px; height: 48px;
+  background: rgba(200,255,28,0.08);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+.award-card h3 {
+  font-size: 15px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 10px;
+}
+.award-card > p {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+}
+.award-card ul {
+  list-style: none;
+  padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.award-card ul li {
+  font-size: 13px;
+  color: var(--text-mute);
+  display: flex; align-items: center; gap: 8px;
+}
+.award-card ul li::before {
+  content: '';
+  width: 4px; height: 4px;
+  background: var(--accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.section__cta-bottom { text-align: center; margin-top: 40px; }
+
+/* ============== IDENTITY TAGS ============== */
+.identity-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 24px;
+}
+.identity-tag {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 14px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+/* ============== PROCESO 6 STEPS ============== */
+.process--6 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 980px) { .process--6 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .process--6 { grid-template-columns: 1fr; } }
+
+/* ============== BENEFIT LIST (reducir riesgo) ============== */
+.benefit-list {
+  list-style: none;
+  padding: 0; margin: 32px auto 0;
+  max-width: 680px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.benefit-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 15px;
+  color: var(--text-dim);
+}
+.benefit-list__check {
+  width: 22px; height: 22px;
+  background: rgba(200,255,28,0.1);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--accent);
+}
+@media (max-width: 560px) { .benefit-list { grid-template-columns: 1fr; } }
+
+/* ============== DEADLINE / FECHA ============== */
+.deadline-box { max-width: 600px; margin: 0 auto; text-align: center; }
+.deadline-input-wrap {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 24px 0 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.deadline-input {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .15s;
+  min-width: 180px;
+}
+.deadline-input:focus { border-color: var(--accent); }
+.deadline-hint { font-size: 13px; color: var(--text-mute); margin: 0; }
+
+/* ============== FAQ ============== */
+.faq { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.faq__item {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color .15s;
+}
+.faq__item[open] { border-color: rgba(200,255,28,0.25); }
+.faq__item summary {
+  list-style: none;
+  padding: 18px 22px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  user-select: none;
+}
+.faq__item summary::-webkit-details-marker { display: none; }
+.faq__chevron {
+  width: 18px; height: 18px;
+  color: var(--text-mute);
+  transition: transform .2s;
+  flex-shrink: 0;
+}
+.faq__item[open] .faq__chevron { transform: rotate(180deg); color: var(--accent); }
+.faq__answer {
+  padding: 0 22px 18px;
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+.faq__answer p { margin: 0; }
+
+/* ============== STICKY CTA MOBILE ============== */
+.sticky-cta {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  padding: 12px 20px 16px;
+  background: rgba(10,10,10,0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+  z-index: 200;
+  justify-content: center;
+  transform: translateY(100%);
+  transition: transform .3s ease;
+}
+.sticky-cta.is-visible { transform: translateY(0); }
+.sticky-cta .btn { width: 100%; max-width: 400px; justify-content: center; }
+@media (max-width: 980px) {
+  .sticky-cta { display: flex; }
+  .sticky-active .wa-fab { display: none; }
+}
