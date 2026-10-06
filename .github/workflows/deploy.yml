@@ -6,6 +6,7 @@ on:
     paths:
       - 'index.html'
       - 'torneos.html'
+      - 'regalos-empresariales-fin-de-ano.html'
       - 'error.html'
       - 'config.js'
       - 'sitemap.xml'
