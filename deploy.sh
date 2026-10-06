@@ -49,6 +49,11 @@ aws s3 cp torneos.html "s3://${BUCKET}/torneos.html" \
   --content-type "text/html; charset=utf-8" \
   --metadata-directive REPLACE
 
+aws s3 cp regalos-empresariales-fin-de-ano.html "s3://${BUCKET}/regalos-empresariales-fin-de-ano.html" \
+  --cache-control "public, max-age=60, must-revalidate" \
+  --content-type "text/html; charset=utf-8" \
+  --metadata-directive REPLACE
+
 # CSS / JS / SVG: cache larga
 aws s3 cp assets/ "s3://${BUCKET}/assets/" \
   --recursive \

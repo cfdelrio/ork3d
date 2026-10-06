@@ -107,11 +107,113 @@
     }
   }
 
+  // ── Gift quote form ────────────────────────────────────────────────────
+  function setupGiftQuoteForm() {
+    var form    = document.getElementById('quoteForm');
+    var submit  = document.getElementById('quoteSubmit');
+    var errBox  = document.getElementById('formStateError');
+    var success = document.getElementById('formStateSuccess');
+    var waFall  = document.getElementById('successWaFallback');
+    if (!form) return;
+
+    var required = ['qEmpresa','qNombre','qEmail','qWa','qCantidad','qDestinatarios','qFecha'];
+
+    function validate() {
+      var ok = true;
+      required.forEach(function (id) {
+        var el  = document.getElementById(id);
+        var err = document.getElementById(id + '-error');
+        if (!el) return;
+        var empty = !el.value.trim();
+        var emailBad = (id === 'qEmail' && !empty && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(el.value));
+        if (empty || emailBad) {
+          el.setAttribute('aria-invalid', 'true');
+          if (err) err.textContent = empty ? 'Campo requerido.' : 'Email inválido.';
+          ok = false;
+        } else {
+          el.removeAttribute('aria-invalid');
+          if (err) err.textContent = '';
+        }
+      });
+      return ok;
+    }
+
+    function buildMsg() {
+      var g = function (id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; };
+      var dest = g('qDestinatarios');
+      var destMap = { equipo:'Equipo / empleados', clientes:'Clientes', proveedores:'Proveedores', otro:'Otro' };
+      return 'Hola ORK3D 👋\nQuiero consultar regalos empresariales de fin de año.\n\n' +
+        'Empresa: ' + g('qEmpresa') + '\n' +
+        'Nombre: ' + g('qNombre') + '\n' +
+        'Email: ' + g('qEmail') + '\n' +
+        'WhatsApp: ' + g('qWa') + '\n' +
+        'Cantidad: ' + g('qCantidad') + '\n' +
+        'Para: ' + (destMap[dest] || dest) + '\n' +
+        'Fecha ideal: ' + (g('qFecha') || 'a confirmar') + '\n' +
+        'Presupuesto aprox./u: ' + (g('qPresupuesto') || 'sin especificar') + '\n' +
+        (g('qComentarios') ? '\nDetalle: ' + g('qComentarios') : '');
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!validate()) {
+        if (errBox) errBox.hidden = false;
+        track('form_error', { form: 'gift_quote' });
+        return;
+      }
+      if (errBox) errBox.hidden = true;
+      if (submit) submit.classList.add('is-loading');
+      track('form_submit', { form: 'gift_quote' });
+      var url = buildWaUrl(buildMsg());
+      if (waFall) waFall.href = url;
+      window.open(url, '_blank', 'noopener');
+      setTimeout(function () {
+        form.hidden = true;
+        if (success) success.hidden = false;
+        if (submit) submit.classList.remove('is-loading');
+      }, 800);
+    });
+
+    required.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('blur', function () { validate(); });
+    });
+  }
+
+  // ── Gift page analytics (data-track elements) ──────────────────────────
+  function setupGiftPageAnalytics() {
+    var tracked = document.querySelectorAll('[data-track]');
+    for (var i = 0; i < tracked.length; i++) {
+      (function (el) {
+        var ev  = el.getAttribute('data-track');
+        var src = el.getAttribute('data-track-source') || '';
+        el.addEventListener('click', function () {
+          track(ev, src ? { source: src } : {});
+        });
+      })(tracked[i]);
+    }
+
+    if ('IntersectionObserver' in window) {
+      var gifts = document.getElementById('regalos');
+      if (gifts) {
+        new IntersectionObserver(function (entries, obs) {
+          if (entries[0].isIntersecting) {
+            track('gifts_section_viewed', {});
+            obs.disconnect();
+          }
+        }, { threshold: 0.3 }).observe(gifts);
+      }
+    }
+  }
+
   // ── Page-level events ──────────────────────────────────────────────────
   function trackPageView() {
     var p = window.location.pathname;
     if (p === '/torneos' || p === '/torneos.html' || p === '/torneos/') {
       track('view_tournaments', {});
+    }
+    if (p.indexOf('regalos-empresariales') !== -1) {
+      track('view_gift_page', {});
     }
   }
 
@@ -124,6 +226,8 @@
   // ── Init ────────────────────────────────────────────────────────────────
   wireWaLinks();
   setupDeadlineCta();
+  setupGiftQuoteForm();
+  setupGiftPageAnalytics();
   setupNav();
   setupStickyMobile();
   trackPageView();
