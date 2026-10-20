@@ -1299,3 +1299,65 @@ button { font-family: inherit; cursor: pointer; }
   .ml-icon { display: none; }
 }
 
+/* ============== URGENT STRIP (24h orders) ============== */
+.urgent-strip {
+  margin-top: 48px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.urgent-strip__copy {
+  flex: 1;
+}
+.urgent-strip__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.urgent-strip__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+.urgent-strip__desc {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin: 0;
+  max-width: 520px;
+}
+@media (max-width: 720px) {
+  .urgent-strip {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 24px 20px;
+  }
+  .urgent-strip .btn { width: 100%; justify-content: center; }
+}
+
+/* ============== CTA FINAL TAGLINE ============== */
+.cta-final__tagline {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 12px;
+}
+
+/* ============== DEADLINE NOTE (torneos) ============== */
+.deadline-note {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-top: 8px;
+}
+
