@@ -206,6 +206,29 @@
     }
   }
 
+  // ── Product card CTAs (section #productos) ─────────────────────────────
+  function wireProductCards() {
+    var cards = document.querySelectorAll('[data-product-id]');
+    for (var i = 0; i < cards.length; i++) {
+      (function (el) {
+        var msg         = el.getAttribute('data-wa-msg');
+        var productId   = el.getAttribute('data-product-id');
+        var productName = el.getAttribute('data-product-name');
+        el.setAttribute('href', buildWaUrl(msg));
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener');
+        el.addEventListener('click', function () {
+          track('click_product_whatsapp', {
+            product_id: productId,
+            product_name: productName,
+            source_section: 'fabricamos',
+            destination: 'whatsapp'
+          });
+        });
+      })(cards[i]);
+    }
+  }
+
   // ── Page-level events ──────────────────────────────────────────────────
   function trackPageView() {
     var p = window.location.pathname;
@@ -225,6 +248,7 @@
 
   // ── Init ────────────────────────────────────────────────────────────────
   wireWaLinks();
+  wireProductCards();
   setupDeadlineCta();
   setupGiftQuoteForm();
   setupGiftPageAnalytics();

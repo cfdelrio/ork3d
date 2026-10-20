@@ -403,9 +403,43 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin: 0;
+  margin: 0 0 12px;
   color: var(--text-dim);
   font-weight: 600;
+}
+.card-product__cta {
+  display: inline-block;
+  padding: 7px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 100px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .2s ease, transform .2s ease;
+  pointer-events: none;
+}
+.card-product:hover .card-product__cta {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.card-product__cta:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (hover: none), (max-width: 768px) {
+  .card-product__cta {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
 }
 
 /* ============== PROCESO ============== */
