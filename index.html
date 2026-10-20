@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/assets/css/styles.css?v=5" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=6" />
 
 <script type="application/ld+json">
 {
@@ -73,13 +73,13 @@
 <main>
 
 <!-- HERO -->
-<section class="hero hero--cream" id="hero">
+<section class="hero hero--cream theme-cream" id="hero">
   <div class="container hero__inner">
     <div class="hero__copy">
       <p class="hero__eyebrow">Trofeos, medallas y objetos personalizados</p>
       <h1 class="hero__title">
         Lo que imaginás,
-        <span class="hero__highlight">lo convertimos</span>
+        <span class="hl">lo convertimos</span>
         en una pieza real
       </h1>
       <p class="hero__sub">
@@ -112,63 +112,65 @@
 </section>
 
 <!-- PARA CADA OCASIÓN -->
-<section class="section section--dark" id="ideal-para">
+<section class="section theme-cream" id="ideal-para">
   <div class="container">
-    <h2 class="section__title section__title--center">¿Qué querés <span class="accent">crear</span>?</h2>
+    <h2 class="section__title section__title--center">¿Qué querés <span class="hl">crear</span>?</h2>
     <p class="section__sub">Cada pieza parte de una intención. Encontrá la tuya.</p>
-    <div class="grid grid--3">
-      <article class="card-ideal">
-        <div class="card-ideal__icon icon--pink">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        </div>
-        <h3>Celebrar una persona o un momento</h3>
-        <p>Souvenirs con el nombre del cumpleañero, letras, llaveros y piezas únicas para que cada invitado se lleve algo que recuerde.</p>
-      </article>
-      <article class="card-ideal">
-        <div class="card-ideal__icon icon--blue">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
-        </div>
-        <h3>Reconocer a tu equipo</h3>
-        <p>Placas, reconocimientos y piezas con la identidad de tu empresa — para logros, aniversarios o personas que lo merecen.</p>
-      </article>
-      <article class="card-ideal">
-        <div class="card-ideal__icon icon--lime">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </div>
-        <h3>Representar tu marca</h3>
-        <p>Piezas de stand, objetos promocionales y souvenirs que comunican la identidad de tu marca en eventos y ferias.</p>
-      </article>
-      <article class="card-ideal">
-        <div class="card-ideal__icon icon--lime">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+    <div class="ideal">
+      <article class="ideal-tile ideal-tile--coral">
+        <div class="ideal-tile__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
         </div>
         <h3>Premiar una competencia</h3>
         <p>Trofeos para campeón, MVP, goleador y más. Cada pieza con los colores, el nombre y la identidad de tu torneo.</p>
       </article>
-      <article class="card-ideal">
-        <div class="card-ideal__icon icon--purple">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7Z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7Z"/></svg>
+      <article class="ideal-tile ideal-tile--lila">
+        <div class="ideal-tile__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         </div>
-        <h3>Regalar algo que no existe en otro lado</h3>
-        <p>Cuadros, figuras, llaveros y piezas únicas para fechas que merecen algo especial y diferente.</p>
+        <h3>Reconocer a tu equipo</h3>
+        <p>Placas, reconocimientos y piezas con la identidad de tu empresa — para logros, aniversarios o personas que lo merecen.</p>
       </article>
-      <article class="card-ideal">
-        <div class="card-ideal__icon icon--blue">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+      <ul class="ideal-list">
+        <li class="ideal-list__item">
+          <span class="ideal-list__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
+          <div>
+            <h3>Representar tu marca</h3>
+            <p>Piezas de stand, objetos promocionales y souvenirs que comunican la identidad de tu marca en eventos y ferias.</p>
+          </div>
+        </li>
+        <li class="ideal-list__item">
+          <span class="ideal-list__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7Z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7Z"/></svg></span>
+          <div>
+            <h3>Regalar algo que no existe en otro lado</h3>
+            <p>Cuadros, figuras, llaveros y piezas únicas para fechas que merecen algo especial y diferente.</p>
+          </div>
+        </li>
+        <li class="ideal-list__item">
+          <span class="ideal-list__ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg></span>
+          <div>
+            <h3>Guardar el recuerdo de una etapa</h3>
+            <p>Plaquetas conmemorativas y recuerdos de fin de etapa que las personas conservan toda la vida.</p>
+          </div>
+        </li>
+      </ul>
+      <article class="ideal-tile ideal-tile--lima">
+        <div class="ideal-tile__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </div>
-        <h3>Guardar el recuerdo de una etapa</h3>
-        <p>Plaquetas conmemorativas y recuerdos de fin de etapa que las personas conservan toda la vida.</p>
+        <h3>Celebrar una persona o un momento</h3>
+        <p>Souvenirs con el nombre del cumpleañero, letras, llaveros y piezas únicas para que cada invitado se lleve algo que recuerde.</p>
       </article>
     </div>
   </div>
 </section>
 
 <!-- LO QUE FABRICAMOS -->
-<section class="section" id="fabricamos">
+<section class="section theme-ink" id="fabricamos">
   <div class="container">
     <h2 class="section__title section__title--center">Lo que <span class="accent">fabricamos</span></h2>
     <p class="section__sub">Desde una pieza individual hasta series de 500. Todo diseñado y fabricado en Buenos Aires.</p>
-    <div class="grid grid--4">
+    <div class="grid grid--4 grid--fab">
       <article class="card-fab">
         <div class="card-fab__icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></div>
         <h3>Letreros & Letras 3D</h3>
@@ -214,7 +216,7 @@
 </section>
 
 <!-- PRODUCTOS -->
-<section class="section" id="productos">
+<section class="section theme-ink" id="productos">
   <div class="container">
     <h2 class="section__title section__title--center">
       Un premio para cada momento que vale la pena <span class="accent">reconocer</span>
