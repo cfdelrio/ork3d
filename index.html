@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/assets/css/styles.css?v=6" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=7" />
 
 <script type="application/ld+json">
 {
@@ -114,7 +114,7 @@
 <!-- PARA CADA OCASIÓN -->
 <section class="section theme-cream" id="ideal-para">
   <div class="container">
-    <h2 class="section__title section__title--center">¿Qué querés <span class="hl">crear</span>?</h2>
+    <h2 class="section__title section__title--center" data-reveal>¿Qué querés <span class="hl">crear</span>?</h2>
     <p class="section__sub">Cada pieza parte de una intención. Encontrá la tuya.</p>
     <div class="ideal">
       <article class="ideal-tile ideal-tile--coral">
@@ -168,7 +168,7 @@
 <!-- LO QUE FABRICAMOS -->
 <section class="section theme-ink" id="fabricamos">
   <div class="container">
-    <h2 class="section__title section__title--center">Lo que <span class="accent">fabricamos</span></h2>
+    <h2 class="section__title section__title--center" data-reveal>Lo que <span class="accent">fabricamos</span></h2>
     <p class="section__sub">Desde una pieza individual hasta series de 500. Todo diseñado y fabricado en Buenos Aires.</p>
     <div class="grid grid--4 grid--fab">
       <article class="card-fab">
@@ -218,7 +218,7 @@
 <!-- PRODUCTOS -->
 <section class="section theme-ink" id="productos">
   <div class="container">
-    <h2 class="section__title section__title--center">
+    <h2 class="section__title section__title--center" data-reveal>
       Un premio para cada momento que vale la pena <span class="accent">reconocer</span>
     </h2>
     <div class="grid grid--4 grid--products">
@@ -291,51 +291,51 @@
 </section>
 
 <!-- PROCESO -->
-<section class="section section--dark" id="proceso">
+<section class="section theme-cream" id="proceso">
   <div class="container">
-    <h2 class="section__title section__title--center">De una idea a un objeto real</h2>
-    <ol class="process">
-      <li class="process__step">
-        <div class="process__num">1.</div>
-        <div class="process__icon">
+    <h2 class="section__title" data-reveal>De una idea a un objeto real</h2>
+    <ol class="journey">
+      <li class="journey__step journey__step--coral" data-reveal>
+        <span class="journey__num">01</span>
+        <div class="journey__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         </div>
         <h3>Nos contás la idea</h3>
         <p>Puede ser una frase, logo, escudo, referencia o foto.</p>
       </li>
-      <li class="process__step">
-        <div class="process__num">2.</div>
-        <div class="process__icon">
+      <li class="journey__step journey__step--lila" data-reveal>
+        <span class="journey__num">02</span>
+        <div class="journey__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>
         </div>
         <h3>Le damos forma</h3>
         <p>Diseñamos cómo convertir esa idea en una pieza con la identidad que necesitás.</p>
       </li>
-      <li class="process__step">
-        <div class="process__num">3.</div>
-        <div class="process__icon">
+      <li class="journey__step journey__step--lima" data-reveal>
+        <span class="journey__num">03</span>
+        <div class="journey__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </div>
         <h3>La hacemos tuya</h3>
         <p>Incorporamos logo, colores, nombres y todos los elementos de identidad necesarios.</p>
       </li>
-      <li class="process__step">
-        <div class="process__num">4.</div>
-        <div class="process__icon">
+      <li class="journey__step journey__step--ink" data-reveal>
+        <span class="journey__num">04</span>
+        <div class="journey__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16h-2a4 4 0 0 1 0-8h2"/><path d="M8 16h2a4 4 0 0 0 0-8H8"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
         </div>
         <h3>La fabricamos y la entregamos</h3>
         <p>Producción en Buenos Aires. Coordinamos entrega o envío.</p>
       </li>
     </ol>
-    <div class="urgent-strip">
+    <div class="urgent-strip" data-reveal>
       <div class="urgent-strip__copy">
         <p class="urgent-strip__label">¿Tenés poco tiempo?</p>
         <h3 class="urgent-strip__title">Contanos la fecha y evaluamos si llegamos</h3>
         <p class="urgent-strip__desc">Recibimos pedidos online las 24 hs. Si la fecha está cerca, escribinos — revisamos la solicitud y te decimos qué es posible.</p>
       </div>
       <a href="#"
-         class="btn btn--primary"
+         class="btn btn--primary btn--lg"
          data-wa
          data-wa-source="process_urgent"
          data-wa-msg="Hola ORK3D &#x1F44B;&#10;Necesito consultar disponibilidad para un pedido con fecha cercana.&#10;&#10;Fecha del evento: &#10;Tipo de pieza: &#10;Cantidad: "
@@ -348,58 +348,64 @@
 </section>
 
 <!-- TORNEOS -->
-<section class="section section--feature" id="torneos">
+<section class="section theme-coral" id="torneos">
   <div class="container feature">
-    <div class="feature__media" aria-hidden="true">
-      <img src="/assets/img/feature-torneo.svg" alt="" loading="lazy" width="520" height="420"/>
+    <div class="feature__tile" aria-hidden="true" data-reveal>
+      <img src="/assets/img/p-trofeo-campeon.svg" alt="" loading="lazy" width="520" height="520"/>
     </div>
     <div class="feature__copy">
-      <h2 class="section__title">
-        Dale identidad a la premiación <span class="accent">de tu torneo</span>
+      <p class="feature__eyebrow">Para torneos</p>
+      <h2 class="section__title" data-reveal>
+        Dale identidad a la premiación <span class="hl">de tu torneo</span>
       </h2>
       <p>Tu torneo ya tiene un nombre, colores y una historia. La premiación también puede reflejarla. Diseñamos trofeos, medallas y reconocimientos con la identidad de tu torneo.</p>
       <ul class="kit">
-        <li><span class="kit__ico">🏆</span><strong>Copa Campeón</strong></li>
-        <li><span class="kit__ico">🥇</span><strong>Medalla Personalizada</strong></li>
-        <li><span class="kit__ico">⭐</span><strong>Premio Figura</strong></li>
-        <li><span class="kit__ico">⚽</span><strong>Goleador</strong></li>
-        <li><span class="kit__ico">🧤</span><strong>Mejor Arquero</strong></li>
-        <li><span class="kit__ico">🏅</span><strong>Placa para el Ganador</strong></li>
-        <li><span class="kit__ico">👕</span><strong>Kit Completo Final</strong></li>
+        <li><strong>Copa Campeón</strong></li>
+        <li><strong>Medalla Personalizada</strong></li>
+        <li><strong>Premio Figura</strong></li>
+        <li><strong>Goleador</strong></li>
+        <li><strong>Mejor Arquero</strong></li>
+        <li><strong>Placa para el Ganador</strong></li>
+        <li><strong>Kit Completo Final</strong></li>
       </ul>
-      <a href="/torneos" class="btn btn--primary btn--lg">Ver premios para torneos</a>
+      <a href="/torneos" class="btn btn--ink btn--lg btn--arrow">Ver premios para torneos</a>
     </div>
   </div>
 </section>
 
 <!-- EMPRESAS -->
-<section class="section" id="empresas">
+<section class="section theme-lila" id="empresas">
   <div class="container">
-    <h2 class="section__title section__title--center">
-      Reconocimientos que hablan <span class="accent">de tu empresa</span>
+    <h2 class="section__title section__title--center" data-reveal>
+      Reconocimientos que hablan <span class="ul">de tu empresa</span>
     </h2>
     <p class="section__lead">
       Fabricamos piezas para celebrar logros, aniversarios, hitos y personas — con la identidad de tu empresa. Desde reconocimientos individuales hasta kits para equipos.
     </p>
-    <div class="grid grid--gallery">
-      <div class="gallery-item"><img src="/assets/img/g-trofeos.svg" alt="Trofeos deportivos" loading="lazy" width="160" height="160"/><span>Trofeos deportivos</span></div>
-      <div class="gallery-item"><img src="/assets/img/g-medallas.svg" alt="Medallas personalizadas" loading="lazy" width="160" height="160"/><span>Medallas personalizadas</span></div>
-      <div class="gallery-item"><img src="/assets/img/g-llaveros.svg" alt="Llaveros de club" loading="lazy" width="160" height="160"/><span>Llaveros de club</span></div>
-      <div class="gallery-item"><img src="/assets/img/g-logos.svg" alt="Logos 3D" loading="lazy" width="160" height="160"/><span>Logos 3D</span></div>
-      <div class="gallery-item"><img src="/assets/img/g-soportes.svg" alt="Soportes para escritorio" loading="lazy" width="160" height="160"/><span>Soportes para escritorio</span></div>
-      <div class="gallery-item"><img src="/assets/img/g-merch.svg" alt="Merchandising para marcas" loading="lazy" width="160" height="160"/><span>Merchandising para marcas</span></div>
-      <div class="gallery-item gallery-item--wide"><img src="/assets/img/g-funcional.svg" alt="Piezas funcionales a medida" loading="lazy" width="160" height="160"/><span>Piezas funcionales a medida</span></div>
+    <div class="empresas">
+      <div class="empresas__tile" aria-hidden="true" data-reveal>
+        <img src="/assets/img/p-empresarial.svg" alt="" loading="lazy" width="520" height="520"/>
+      </div>
+      <ol class="index-list" data-reveal>
+        <li><span>01</span>Trofeos deportivos</li>
+        <li><span>02</span>Medallas personalizadas</li>
+        <li><span>03</span>Llaveros de club</li>
+        <li><span>04</span>Logos 3D</li>
+        <li><span>05</span>Soportes para escritorio</li>
+        <li><span>06</span>Merchandising para marcas</li>
+        <li><span>07</span>Piezas funcionales a medida</li>
+      </ol>
     </div>
   </div>
 </section>
 
 <!-- CTA FINAL -->
-<section class="section section--cta" id="contacto">
+<section class="section theme-ink" id="contacto">
   <div class="container cta-final">
     <div class="cta-final__copy">
-      <p class="cta-final__tagline">Las ideas no tienen horario.</p>
-      <h2 class="section__title">
-        ¿Tenés una idea? <br/>La convertimos en una <span class="accent">pieza real</span>
+      <p class="cta-final__tagline" data-reveal>Las ideas no tienen horario.</p>
+      <h2 class="section__title" data-reveal>
+        ¿Tenés una idea? <br/>La convertimos en una <span class="coral">pieza real</span>
       </h2>
       <p>Mandanos una idea, un logo, una foto o una referencia — a cualquier hora. No hace falta que tengas el diseño resuelto: recibimos pedidos online las 24 hs y te respondemos a la brevedad.</p>
       <a href="#" class="btn btn--primary btn--lg"

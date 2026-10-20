@@ -242,9 +242,30 @@
     if (y) y.textContent = new Date().getFullYear();
   }
 
+  // ── Viewport reveal ─────────────────────────────────────────────────────
+  function setupReveal() {
+    document.documentElement.classList.add('js');
+    var items = document.querySelectorAll('[data-reveal]');
+    if (!items.length) return;
+    if (!('IntersectionObserver' in window)) {
+      for (var k = 0; k < items.length; k++) items[k].classList.add('is-in');
+      return;
+    }
+    var io = new IntersectionObserver(function (entries, obs) {
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].isIntersecting) {
+          entries[i].target.classList.add('is-in');
+          obs.unobserve(entries[i].target);
+        }
+      }
+    }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+    for (var j = 0; j < items.length; j++) io.observe(items[j]);
+  }
+
   // ── Init ────────────────────────────────────────────────────────────────
   wireWaLinks();
   wireProductCards();
+  setupReveal();
   setupDeadlineCta();
   setupGiftQuoteForm();
   setupGiftPageAnalytics();
