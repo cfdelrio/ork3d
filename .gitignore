@@ -5,3 +5,5 @@ node_modules/
 __pycache__/
 *.pyc
 dev/e2e/capturas/
+admin/.env
+admin/out/
