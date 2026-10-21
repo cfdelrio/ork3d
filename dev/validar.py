@@ -199,6 +199,28 @@ def validar_iam():
     comprobar('Bucket privado: niega tráfico sin TLS', bool(niegan_http))
 
 
+def validar_despliegue():
+    infra = leer('infra/resenas-setup.sh')
+    comprobar('Despliegue: el script arranca en DRY_RUN=1 por defecto',
+              'DRY_RUN="${DRY_RUN:-1}"' in infra)
+    comprobar('Despliegue: el modo real pide escribir CREAR antes de tocar AWS',
+              'CREAR' in infra and 'read -r -p' in infra)
+    comprobar('Despliegue: el script no borra recursos de AWS (delete-*, --recursive, s3 rm)',
+              re.search(r'delete-|--recursive|\bs3 rm\b', infra) is None)
+    ruta_runbook = os.path.join(ROOT, 'docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md')
+    comprobar('Despliegue: existe el runbook manual', os.path.isfile(ruta_runbook))
+    if os.path.isfile(ruta_runbook):
+        runbook = leer('docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md')
+        comprobar('Despliegue: el runbook exige dry-run y trae rollback',
+                  'DRY_RUN=1' in runbook and 'Rollback' in runbook)
+    # Ningún número de cuenta AWS (12 dígitos) ni access key versionada en el repo.
+    cuentas = correr(['git', 'grep', '-n', '-E', r'(^|[^0-9])[0-9]{12}([^0-9]|$)', '--', '.'])
+    comprobar('Seguridad: sin números de cuenta AWS de 12 dígitos en el repo',
+              cuentas.returncode == 1 and cuentas.stdout == '', cuentas.stdout[:300])
+    llaves = correr(['git', 'grep', '-n', '-E', 'AKIA[0-9A-Z]{16}', '--', '.'])
+    comprobar('Seguridad: sin access keys AKIA en el repo', llaves.returncode == 1, llaves.stdout[:200])
+
+
 def main():
     validar_javascript()
     validar_shell()
@@ -207,6 +229,7 @@ def main():
     validar_html()
     validar_politicas()
     validar_iam()
+    validar_despliegue()
     print(f'\nValidaciones: {aprobadas} PASS, {len(fallos)} FAIL')
     sys.exit(1 if fallos else 0)
 

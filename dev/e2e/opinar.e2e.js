@@ -4,7 +4,7 @@
  * Uso (desde la raíz del repo):
  *   SHOTS_DIR=<carpeta para capturas> node dev/e2e/opinar.e2e.js
  *
- * Variables opcionales: PORT (8799), CHROME_PATH (/opt/pw-browsers/chromium),
+ * Variables opcionales: PORT (8799), CHROME_PATH (si no, el Chromium de Playwright),
  * PLAYWRIGHT_PATH (si Playwright no está en el NODE_PATH).
  */
 const path = require('path');
@@ -16,7 +16,9 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const PORT = Number(process.env.PORT || 8799);
 const BASE = `http://127.0.0.1:${PORT}`;
 const SHOTS = process.env.SHOTS_DIR || path.join(ROOT, 'dev', 'e2e', 'capturas');
-const CHROME = process.env.CHROME_PATH || '/opt/pw-browsers/chromium';
+// Chromium: CHROME_PATH si se define; si no, el de la sandbox; si no existe, el que trae Playwright.
+const CHROME = process.env.CHROME_PATH
+  || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
