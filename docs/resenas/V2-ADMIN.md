@@ -29,7 +29,7 @@ cambios de DNS, cambios de IAM reales ni despliegue.
 | SES | Diseño con AWS SES, implementado con una abstracción y `FakeSES` | Sin SES real ni DNS en esta etapa |
 | Buzón | Requisito de 2FA documentado para producción, sin código asociado | |
 | Foto | Bytes servidos por la Lambda admin, con sesión y `no-store` | Nunca URL pública ni bucket privado expuesto |
-| Function URL admin | Diseño objetivo AWS_IAM + OAC de CloudFront | No se depende de eso localmente. Verificar antes del deploy |
+| Function URL admin | OAC de CloudFront hacia una Function URL AWS_IAM, con dos permisos de invocación, reenvío explícito y hash del body en los POST (§16) | La forma exacta se verifica en la cuenta y en la documentación primaria antes de cualquier deploy |
 | Transiciones | Más estrictas que la CLI (ver §6) | Diferencia cubierta con tests |
 
 ### Desviaciones y decisiones que surgieron en la implementación
@@ -105,6 +105,7 @@ Para toda mutación administrativa (todos los `POST`):
 - `Content-Type: application/json` (exacto, con o sin `; charset=utf-8`). Si no, `415`.
 - `Origin` exactamente igual a `ALLOWED_ORIGIN`. Si no, `403`.
 - Header `X-Admin-Request: 1`. Si falta, `403`.
+- Header `x-amz-content-sha256` con el SHA-256 hex exacto del body en todo POST. Lo exige OAC hacia la Function URL; el detalle está en §16.2. El panel lo calcula en `llamar()`.
 - Un `POST` sin sesión responde `401`. Con sesión pero sin cabeceras, responde `403`.
 
 Los `GET` nunca producen efectos secundarios. Se testea con snapshot del almacén.
@@ -289,8 +290,15 @@ Se regenera leyendo todas las reseñas, como hoy. Se invalida `/resenas/*`.
   `IfMatch=<etag>`. Si la escritura falla por precondición, responde `409 conflicto_concurrencia`
   y no sobrescribe. El fake de S3 de los tests simula dos mutaciones: gana una, la otra
   recibe conflicto.
-- **Verificación de S3 real:** el comportamiento de `If-Match` en la cuenta no está verificado.
-  Antes del deploy hay que hacer un smoke real de dos escrituras concurrentes con `If-Match`.
+- **Soporte de S3:** `PutObject` soporta `If-Match` con el ETag del objeto (escrituras condicionales).
+  No es una incertidumbre de arquitectura. Los códigos que esperamos son `412 PreconditionFailed` (el
+  ETag no coincide) y `409 ConditionalRequestConflict` (escrituras concurrentes a la misma clave).
+  `Almacen` trata ambos como conflicto, y también un `404` si la clave desaparece entre la lectura y la
+  escritura condicionada.
+- **Gate productivo (no ejecutado):** antes de producción, un smoke en la cuenta confirma el comportamiento
+  real: escritura inicial, obtención del ETag, `PutObject --if-match`, dos escritores con el mismo ETag, un
+  solo ganador, código del perdedor y limpieza exacta del objeto de prueba. Está especificado en el runbook,
+  §18.5.1. Es un control de la cuenta, no una duda de diseño.
   Hasta entonces, la implementación depende de la abstracción y de los tests locales.
 - **Lock del export:** `admin/locks/export.json` con create-only. Si existe y no venció,
   el lock está ocupado (se reintenta 3 veces con espera). Si venció, se toma con `IfMatch`
@@ -357,6 +365,10 @@ Archivos previstos, sin ejecutar AWS:
 - `infra/admin-setup.sh`: `DRY_RUN=1` por defecto. Imprime los comandos y no llama a AWS.
 - `infra/resenas/admin-lambda-permisos.json`: política del rol de la Lambda admin.
 - `infra/resenas/admin-cloudfront-behavior.json`: plan de la behavior `/admin/api/*`.
+- `infra/resenas/admin-origin-request-policy.json`: política de origen propia de `/admin/api/*` (cookie
+  `ork3d_admin`, headers de mutación y `x-amz-content-sha256`, query `estado`).
+- `infra/resenas/admin-function-url-permisos.json`: especificación de los dos permisos de invocación para
+  CloudFront (§16.1).
 - `infra/resenas/lambda-permisos.json`: agrega SES y `notificaciones/*` a la Lambda pública.
 - `infra/resenas/bucket-lifecycle.json`: regla de 2 días para `admin/`.
 - `infra/redirect-www.js`: reglas `/admin/resenas` y `/admin/entrar` (antes de la regla
@@ -365,7 +377,8 @@ Archivos previstos, sin ejecutar AWS:
 - `.github/workflows/deploy.yml`: agrega `admin-web/**` a las rutas que disparan deploy.
 
 Los tests de infraestructura verifican que `DRY_RUN` es el valor por defecto, que no hay
-llamadas reales a AWS y que no aparecen comandos de borrado.
+llamadas reales a AWS y que no aparecen comandos de borrado. También verifican los dos permisos de OAC
+en el dry-run y en la especificación, la política de origen y el behavior sin caché (§16).
 
 ## 15. Seguridad revisada (resumen)
 
@@ -380,6 +393,98 @@ llamadas reales a AWS y que no aparecen comandos de borrado.
 - Correo: sin datos privados. El HTML se escapa.
 - Scanners: los GET no producen efectos. Las acciones son POST con confirmación en la UI.
 - Riesgo de DoS o spam: rate limit global en el login. El costo de SES es marginal.
-- Pendiente antes del deploy: 2FA en el buzón, verificación de `If-Match` en S3 real, verificación
-  de OAC con Function URL AWS_IAM, y la identidad SES de producción (dirección o dominio, y salida
-  del sandbox). Ninguno está verificado en esta etapa.
+- OAC y reenvío de CloudFront: dos permisos de invocación restringidos por `SourceArn`, cabecera
+  `x-amz-content-sha256` obligatoria en los POST y reenvío explícito (§16). Su verificación en la
+  documentación primaria y en la cuenta es un gate.
+- Pendiente antes del deploy: 2FA en el buzón, smoke de `If-Match` en la cuenta (§10 y runbook §18.5.1),
+  verificación de los permisos de OAC y del hash en la cuenta (§16 y runbook §18.5.2), y la identidad SES
+  de producción (dirección o dominio, y salida del sandbox). Ninguno de estos puntos está verificado en
+  esta etapa.
+
+## 16. OAC hacia la Function URL: permisos, hash del body y reenvío
+
+Contrato de la integración CloudFront → Function URL `AWS_IAM` de la Lambda admin. Lo que sigue es lo que el
+repo implementa y lo que queda como gate antes de cualquier deploy.
+
+### 16.1 Permisos de invocación (dos, obligatorios)
+
+La política basada en recursos de `ork3d-resenas-admin` tiene dos sentencias, creadas con
+`aws lambda add-permission` (una por sentencia):
+
+| Statement ID | Acción | Principal | Restricción |
+|---|---|---|---|
+| `AllowCloudFrontOACInvokeFunctionUrl` | `lambda:InvokeFunctionUrl` | `cloudfront.amazonaws.com` | `SourceArn` = `arn:aws:cloudfront::<cuenta>:distribution/<distribución>` |
+| `AllowCloudFrontOACInvokeFunction` | `lambda:InvokeFunction` | `cloudfront.amazonaws.com` | `SourceArn` = la misma distribución |
+
+- El plan (`infra/admin-setup.sh`, paso 5) muestra las dos como líneas `PLAN aws lambda add-permission`.
+- La especificación está en `infra/resenas/admin-function-url-permisos.json`. Los tests de infra fallan si
+  falta cualquiera de las dos acciones en el dry-run o en la especificación, o si cambian el principal o el
+  `SourceArn`.
+- No se amplía el principal ni se quita la restricción por `SourceArn`.
+- Evidencia. (a) La guía de CloudFront para Function URL con OAC describe las dos sentencias. La consultamos
+  por búsqueda (resumen de la página de AWS); la página primaria no fue accesible desde el sandbox. (b) En
+  producción, la Function URL pública de V1 respondió 403 hasta que existieron los dos permisos (runbook,
+  sección 17.1, hallazgo 1). Eso valida la necesidad de `lambda:InvokeFunction` para Function URLs en esta
+  cuenta. No prueba la forma exacta para OAC: queda como gate (§16.4).
+- Endurecimiento posible, no aplicado: agregar `lambda:FunctionUrlAuthType = AWS_IAM` a la primera sentencia
+  y `lambda:InvokedViaFunctionUrl = true` a la segunda, como hace V1 con AuthType NONE. Ambas condiciones
+  restringen más; no amplían. No se aplican porque el pedido fija el alcance en `SourceArn` y porque el
+  comportamiento exacto con OAC no está verificado.
+
+### 16.2 Cabecera `x-amz-content-sha256` en los POST
+
+Estado antes de esta revisión: ningún POST del panel enviaba la cabecera. Se confirmó por lectura del código
+(`llamar()` era el único punto de envío y solo agregaba `Content-Type` y `X-Admin-Request`) y por el E2E, que
+falló en tres casos al exigirla.
+
+Regla implementada en `assets/js/admin-comun.js`, función `llamar()`:
+
+1. Se serializa el body UNA sola vez: `JSON.stringify(cuerpo || {})`. El resultado es un string.
+2. Se calcula SHA-256 sobre los bytes UTF-8 de ese mismo string con `crypto.subtle.digest("SHA-256", ...)`.
+   El digest se escribe en hexadecimal minúscula (64 caracteres).
+3. Se envía ese mismo string como body. No se vuelve a serializar nada.
+4. Cabecera: `x-amz-content-sha256: <hash hex>`.
+5. Se mantienen `Content-Type: application/json` y `X-Admin-Request: 1`.
+
+- Sin Web Crypto (contexto no seguro, por ejemplo HTTP fuera de localhost), la promesa rechaza y el POST no
+  sale: el usuario ve el aviso de conexión. Es una limitación conocida. Ninguna solicitud sale sin firma.
+- POST del panel: `sesion/solicitar`, `sesion/confirmar`, `sesion/cerrar`, `invitaciones`,
+  `resenas/{id}/aprobar`, `/rechazar`, `/ocultar`, `/restaurar`, `/reenviar-aviso` y `exportar`. Todos envían
+  un body JSON (como mínimo `{}`).
+- Verificación: el E2E recalcula el SHA-256 sobre los bytes capturados en la red (`postDataBuffer`) y los
+  compara con la cabecera. El caso final exige que las diez rutas aparezcan. El servidor de desarrollo emula
+  OAC: responde 403 a un POST sin la cabecera o con un hash distinto.
+- El backend no usa el hash como control de integridad. OAC lo necesita para firmar la solicitud hacia la
+  Function URL. TLS protege el body en tránsito.
+
+### 16.3 Reenvío de CloudFront en `/admin/api/*`
+
+- Política de caché: `CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`). No hay caché, y la política de
+  caché no decide qué se reenvía al origen.
+- Política de origen propia: `ork3d-resenas-admin-orp` (`infra/resenas/admin-origin-request-policy.json`).
+  - Headers (whitelist): `Content-Type`, `Origin`, `X-Admin-Request`, `x-amz-content-sha256`.
+  - Cookies (whitelist): `ork3d_admin`. Ninguna otra cookie llega al origen.
+  - Query (whitelist): `estado`.
+  - `Host` no se reenvía: la Function URL necesita su propio host.
+- El reenvío lo decide la política de origen. La lista es explícita, así que la cabecera de hash llega al
+  origen y no depende de la configuración de caché.
+- Descartada: la política administrada `AllViewerExceptHostHeader` también reenvía la cabecera, pero reenvía
+  todas las cookies y headers del viewer.
+- Métodos: CloudFront ofrece tres juegos: `GET/HEAD`; `GET/HEAD/OPTIONS`; y
+  `GET/HEAD/OPTIONS/PUT/POST/PATCH/DELETE`. POST exige el tercero, así que no existe un juego de solo
+  `GET/HEAD/OPTIONS/POST`. PUT, PATCH y DELETE llegan a la Lambda y responden 405 sin efectos (test
+  `MetodosReenviadosTest`). Bloquearlos en el borde requeriría una función de CloudFront en viewer-request:
+  no se agrega en esta etapa.
+- `Origin` llega al origen (lo necesita la comprobación de CSRF). `Cookie` llega solo con `ork3d_admin`.
+
+### 16.4 Estado de verificación
+
+| Punto | Evidencia en esta etapa | Estado |
+|---|---|---|
+| Dos permisos de invocación para OAC | Guía de CloudFront (resumen de búsqueda); V1 en producción (hallazgo 1) | Gate: confirmar en la página primaria y en la cuenta antes del deploy |
+| `x-amz-content-sha256` obligatorio en POST con OAC | Guía de CloudFront (resumen de búsqueda) y un artículo de 2024 | Gate: smoke en la cuenta (runbook §18.5.2) |
+| Juego de métodos con POST | Referencia de la API de CloudFront (resumen de búsqueda) | Confirmado por dos fuentes secundarias |
+| Política de caché `CachingDisabled` | Plantilla del repo | Verificar el Id en la cuenta |
+
+Las búsquedas devolvieron resúmenes de la documentación de AWS. Las páginas primarias no fueron accesibles desde
+el sandbox (bloqueo de egreso). Por eso los puntos de arriba quedan como gates y no como verificados.

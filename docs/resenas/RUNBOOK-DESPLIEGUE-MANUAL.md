@@ -1040,8 +1040,8 @@ aviso por SES cuando entra una reseña pending (detrás de `RESENAS_NOTIFY_ENABL
 | # | Punto | Por qué bloquea | Cómo se verifica |
 | --- | --- | --- | --- |
 | 1 | 2FA en el buzón de `RESENAS_ADMIN_EMAIL` | El acceso al panel depende de ese buzón | Confirmar en la cuenta de correo del moderador |
-| 2 | `If-Match` en S3 real | La moderación concurrente depende de ETag | Dos `put-object --if-match` sobre la misma clave: una gana, la otra recibe `PreconditionFailed`; el objeto conserva el contenido de la que ganó |
-| 3 | OAC con Function URL `AWS_IAM` | Sin esto `/admin/api/*` no llega a la Lambda admin | Crear la Function URL en una Lambda de prueba, `create-function-url-config --auth-type AWS_IAM`, y confirmar con CloudFront (OAC) que la solicitud firmada llega. Si no es viable, parar y reportar: no cambiar el diseño en silencio |
+| 2 | Smoke de `If-Match` en la cuenta (gate) | S3 soporta `If-Match` por ETag. El smoke confirma los códigos reales de esta cuenta antes de producción | Especificado en §18.5.1. No se ejecuta en esta etapa |
+| 3 | OAC con Function URL `AWS_IAM`: dos permisos, reenvío y hash | Sin esto `/admin/api/*` no llega a la Lambda admin. Los dos permisos (`InvokeFunctionUrl` e `InvokeFunction`) son el requisito de la revisión. La confirmación en la página primaria no fue posible desde el sandbox | Verificar la guía de CloudFront y la cuenta según §18.5.2 (política de la función, POST con hash, cookie). Si no es viable, parar y reportar: no cambiar el diseño en silencio |
 | 4 | Identidad SES de `RESENAS_FROM_EMAIL` | La política de `ses:SendEmail` usa `identity/<correo>`; si se verifica un dominio, cambia el ARN | Decisión explícita. Salir del sandbox de SES si hace falta |
 | 5 | DKIM y DMARC | Sin ellos el aviso puede caer en spam | Revisar la configuración DNS antes de activar el aviso. No se toca DNS en esta etapa |
 
@@ -1050,8 +1050,8 @@ aviso por SES cuando entra una reseña pending (detrás de `RESENAS_NOTIFY_ENABL
 ```bash
 # Desde la raíz del repo. Con DRY_RUN=1 (valor por defecto) el script solo imprime lo que correría.
 DRY_RUN=1 infra/admin-setup.sh
-python3 -m unittest discover -s infra/tests -v      # 40 casos: 18 de V1, 22 de V2
-python3 dev/validar.py                               # 134 comprobaciones
+python3 -m unittest discover -s infra/tests -v      # 51 casos: 18 de V1, 33 de V2
+python3 dev/validar.py                               # 138 comprobaciones
 ```
 
 El script no llama a `aws`, `curl` ni `wget` en dry-run. El test de infra lo comprueba con binarios falsos que
@@ -1068,8 +1068,8 @@ explícita, y su sintaxis exacta se verifica en la cuenta antes del deploy.
 | 2 | Log group `/aws/lambda/ork3d-resenas-admin` (30 días) | `aws logs create-log-group` y `put-retention-policy` | dry-run |
 | 3 | Lambda `ork3d-resenas-admin` (python3.12, 256 MB, 10 s) | `aws lambda create-function` con el zip de `admin_app.py` y `nucleo/` | dry-run |
 | 4 | Function URL con `AWS_IAM` | `aws lambda create-function-url-config --auth-type AWS_IAM` | PLAN |
-| 5 | OAC y permiso para CloudFront | `aws cloudfront create-origin-access-control` y `aws lambda add-permission` | PLAN |
-| 6 | Behavior `/admin/api/*` en la distribución | `get-distribution-config` (guardar copia y ETag), luego `update-distribution` con `infra/resenas/admin-cloudfront-behavior.json` | PLAN |
+| 5 | OAC y dos permisos de invocación para CloudFront | `aws cloudfront create-origin-access-control`, y dos `aws lambda add-permission`: `AllowCloudFrontOACInvokeFunctionUrl` (`lambda:InvokeFunctionUrl`) y `AllowCloudFrontOACInvokeFunction` (`lambda:InvokeFunction`), ambos con principal `cloudfront.amazonaws.com` y `SourceArn` de la distribución | PLAN |
+| 6 | Política de origen propia y behavior `/admin/api/*` | `create-origin-request-policy` con `infra/resenas/admin-origin-request-policy.json`; luego `get-distribution-config` (guardar copia y ETag) y `update-distribution` con `infra/resenas/admin-cloudfront-behavior.json`, con el Id de la política en `__ADMIN_ORP_ID__` | PLAN |
 | 7 | Lifecycle de `admin/` (2 días) | `put-bucket-lifecycle-configuration` con `infra/resenas/bucket-lifecycle.json`. **Reemplaza toda la configuración**: el archivo incluye las reglas de V1 | PLAN |
 | 8 | Función `ork3d-redirect-www` | `update-function` y `publish-function` con `infra/redirect-www.js` (reglas `/admin/resenas` y `/admin/entrar`) | PLAN |
 | 9 | Lambda pública: política y código | `put-role-policy` con `infra/resenas/lambda-permisos.json` (agrega SES y `notificaciones/*`) y `update-function-code` con `app.py` y `nucleo/` | PLAN |
@@ -1083,7 +1083,10 @@ Antes de cada paso PLAN: copia de la configuración actual, en un archivo fuera 
 - Paso 3: `get-function-configuration`: Runtime python3.12, Handler `admin_app.handler`, Memory 256, Timeout 10,
   y solo las variables sin secretos (`RESENAS_BUCKET`, `RESENAS_SITE_BUCKET`, `RESENAS_DISTRIBUTION_ID`,
   `RESENAS_ADMIN_EMAIL`, `RESENAS_FROM_EMAIL`, `RESENAS_ADMIN_BASE_URL`, `ALLOWED_ORIGIN`).
-- Paso 6: la behavior `/admin/api/*` apunta al origen admin y no cachea. El resto de las behaviors no cambió.
+- Paso 5: `aws lambda get-policy --function-name ork3d-resenas-admin` muestra exactamente dos sentencias, con principal
+  `cloudfront.amazonaws.com` y `SourceArn` de la distribución: `lambda:InvokeFunctionUrl` e `lambda:InvokeFunction`.
+- Paso 6: la política de origen tiene las cabeceras, la cookie y la query de `infra/resenas/admin-origin-request-policy.json`, sin `Host`.
+  La behavior `/admin/api/*` apunta al origen admin, no cachea (`CachingDisabled`) y usa esa política.
 - Paso 7: `get-bucket-lifecycle-configuration` muestra las tres reglas (pendientes, admin y versiones).
 - Paso 8: `GET /admin/entrar` sirve `admin-web/entrar.html`. `GET /admin/api/sesion` no se reescribe.
 
@@ -1107,6 +1110,39 @@ Ejecutar solo después de la autorización de 18.3. Todo dato de prueba se ident
 8. Limpieza: borrar las reseñas y tokens `SMOKE-V2` con el procedimiento de la sección 15.5. Revocar la sesión
    con `POST /admin/api/sesion/cerrar`.
 
+### 18.5.1 Gate: smoke de `If-Match` en S3 (especificado, NO ejecutar en esta etapa)
+
+S3 soporta `If-Match` con el ETag en `PutObject`. Este smoke confirma los códigos reales de la cuenta antes de
+producción. Usa el bucket privado (`RESENAS_BUCKET`) y una clave de prueba que empieza con `admin/`, así que la regla
+de dos días la limpia si algo queda a medias.
+
+| Paso | Acción | Resultado esperado |
+|---|---|---|
+| 1 | Escritura inicial: `aws s3api put-object` de `{"v":1,"escritor":"inicial"}` a `admin/smoke/if-match-<uuid>.json` | HTTP 200 |
+| 2 | Obtener el ETag: `aws s3api head-object --query ETag --output text` | ETag `E1` |
+| 3 | Escritura condicionada con el ETag vigente: `put-object --if-match "E1"` | HTTP 200; el ETag cambia a `E2` |
+| 4 | Dos escritores con el mismo `E2`, en paralelo, con cuerpos distintos (`w1.json`, `w2.json`) | Exactamente uno gana (200). El otro recibe `412 PreconditionFailed` o `409 ConditionalRequestConflict`, según la carrera. Registrar el código real |
+| 5 | `get-object` de la clave | Contenido del ganador. El perdedor no sobrescribió |
+| 6 | Limpieza exacta: `aws s3api delete-object` solo de esa clave, y luego `head-object` | `delete-object` sin error; `head-object` devuelve 404 |
+
+Criterio de paso: los pasos 1 a 3 dan 200; el paso 4 da exactamente un 200 y un 412 o 409; el paso 5 coincide con
+el ganador; el paso 6 deja la clave inexistente. Antes de correrlo, confirmar que la AWS CLI instalada soporta
+`--if-match` en `put-object` (`aws s3api put-object help`). Si el paso 4 devuelve 404 en lugar de 409 (carrera
+con borrado), `Almacen` ya lo trata como conflicto. Ajustar la documentación, no el código.
+
+### 18.5.2 Gate: OAC, hash y cookie (especificado, NO ejecutar en esta etapa)
+
+1. Verificar en la documentación primaria de AWS (CloudFront, Function URL con OAC) que las dos sentencias
+   coinciden con `infra/resenas/admin-function-url-permisos.json`. Si la documentación pide otra cosa, parar.
+2. Tras el paso 5: `aws lambda get-policy --function-name ork3d-resenas-admin` muestra las dos sentencias y ninguna otra.
+3. Un POST al panel por la distribución, con el hash correcto: el API responde según su estado (200, 202, 401 o 409).
+   El mismo POST sin `x-amz-content-sha256` y con un hash cambiado: el rechazo debe llegar antes de la Lambda.
+   Registrar el código real de cada caso.
+4. Con sesión abierta, `GET /admin/api/sesion` devuelve 200. Eso confirma que la cookie `ork3d_admin` llega a la Lambda.
+5. `/admin/api/*` no cachea: las respuestas no traen indicios de caché (`X-Cache` distinto de `Hit from cloudfront`).
+
+Si alguno de los puntos no se cumple: parar y reportar. No cambiar el diseño en silencio.
+
 ### 18.6 Rollback (por paso, en orden inverso)
 
 | Paso revertido | Cómo volver atrás | Efecto sobre los datos |
@@ -1117,7 +1153,8 @@ Ejecutar solo después de la autorización de 18.3. Todo dato de prueba se ident
 | 8. Redirección | `publish-function` con la versión de la copia guardada en 18.3 | Ninguno |
 | 7. Lifecycle | `put-bucket-lifecycle-configuration` con la copia guardada (la de V1) | Las sesiones y locks de `admin/` ya no vencen en 2 días |
 | 6. Behavior | `update-distribution` con la copia guardada y su ETag | Ninguno |
-| 5. OAC | `delete-origin-access-control` tras quitar la behavior. `remove-permission` en la Lambda admin | Ninguno |
+| 6b. Política de origen | `delete-origin-request-policy` cuando la distribución ya no la usa | Ninguno |
+| 5. OAC y permisos | `remove-permission` de `AllowCloudFrontOACInvokeFunctionUrl` y de `AllowCloudFrontOACInvokeFunction`, y después `delete-origin-access-control` | Ninguno |
 | 4. Function URL | `delete-function-url-config` | Ninguno |
 | 1 a 3. Rol, log group, Lambda | Borrar la Lambda admin y su rol (los datos siguen en el bucket) | Ninguno. Las sesiones abiertas dejan de servir |
 
