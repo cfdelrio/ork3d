@@ -1,12 +1,27 @@
 # Runbook de despliegue manual · reseñas ORK3D (V1, prueba controlada)
 
-**Estado: la infraestructura de AWS se creó desde la máquina del operador. Este documento refleja lo aprendido en esa ejecución (sección 17).** Pendientes: `config.js`, deploy del frontend, smoke test de cliente y merge a `main`. Este documento no crea ni modifica nada por sí solo.
+**Estado: V1 completada en producción.** Infraestructura, `config.js`, merge a `main`, deploy y smoke test productivo están cerrados. Lo que sigue abierto está en la sección 17.3. Este documento no crea ni modifica nada por sí solo.
 Cada comando se corre a mano, en orden, y cada paso tiene una salida esperada. Si una salida no coincide, **parás**.
 
 Qué crea el despliegue de infraestructura: un bucket S3 privado, un rol IAM mínimo, un log group con retención de 30 días,
 una Lambda con Function URL (con sus dos permisos de invocación), concurrencia reservada solo si la cuenta tiene margen,
 y una nueva versión de la CloudFront Function `ork3d-redirect-www` con la regla `/opinar/*`. **No toca** la distribución
 de CloudFront, el bucket del sitio, DNS, certificados, `config.js`, `main` ni la home.
+
+### Estado de validación
+
+| Punto | Estado |
+| --- | --- |
+| `config.js` productivo (commit `768eaa0`) | ✔ COMPLETADO |
+| Merge a `main` (fast-forward desde `b6c9fb2`) | ✔ COMPLETADO |
+| Deploy GitHub Actions (run `39659217831`, #27: success) | ✔ COMPLETADO |
+| Smoke test productivo (sección 14) | ✔ COMPLETADO |
+| Flujo de foto: presign, JPEG y sin metadatos (sección 14.1) | ✔ COMPLETADO |
+| Uso único del token (sección 14.1) | ✔ COMPLETADO |
+| Moderación: pending, aprobación y CLI (sección 14.1) | ✔ COMPLETADO |
+| Export público y privacidad de campos (sección 14.1) | ✔ COMPLETADO |
+| Limpieza del smoke (sección 15.5) | ✔ COMPLETADO |
+| `/opiniones` | ✔ Existe por URL directa, **no lanzada**: noindex, fuera del sitemap y sin enlaces desde home ni navegación |
 
 Reglas:
 
@@ -520,8 +535,7 @@ aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --profile "$AWS_P
 #   esperado: ork3d.com (sin cambios en la distribución)
 ```
 
-Lo que no se verifica todavía, porque depende del deploy del frontend: que `https://ork3d.com/opinar/<token>` se
-reescriba bien. Eso va en la sección 14.
+La reescritura de `https://ork3d.com/opinar/<token>` quedó verificada en el smoke productivo (sección 14.1, filas 2 y 3).
 
 ---
 
@@ -539,8 +553,8 @@ final: `https://<id>.lambda-url.us-east-1.on.aws`.
 
 Esta URL también aparece en la línea `Function URL:` al final de la ejecución real.
 
-**No la pegues en `config.js` todavía.** Pasamela a mí. El cambio de `config.js` es un commit aparte, que se hace
-después de autorizar el deploy del frontend.
+**`config.js` ya usa esta URL** desde el commit `768eaa0`, sin barra final. Fue un commit aparte, como estaba previsto,
+y se desplegó con el run `39659217831` (sección 14).
 
 Verificación con la URL (lectura: solo consulta el token falso, no crea nada):
 
@@ -630,7 +644,7 @@ Solo la navegación a `/opinar/<token>` pasa por el DNS del sitio.
 ## 13. Atomicidad con If-None-Match (I): validada en S3 real (13.1). 13.2 pendiente
 
 Objetivo: confirmar contra S3 real que dos claims concurrentes sobre el mismo token dan **un solo éxito**, y que
-se crea **una sola reseña**. **13.1 quedó validada en S3 real.** **13.2 crea datos reales en producción**: se ejecuta solo con autorización explícita.
+se crea **una sola reseña**. **13.1 quedó validada en S3 real.** **13.2 no se ejecutó**: crea datos reales en producción y requiere autorización explícita. El uso único secuencial del token sí quedó validado en el smoke productivo (sección 14.1).
 
 ### Requisitos
 
@@ -681,7 +695,7 @@ borrar_versiones_de_clave "$RESENAS_BUCKET" "$KEY"
 ```
 cd "$REPO"
 admin/resenas.sh token crear --pedido SMOKE-TEST-ORK3D --producto smoke-test --categoria test \
-  --producto-label "Prueba técnica" --dias 1
+  --producto-label "Prueba técnica ORK3D" --dias 1
 ```
 
 Copiá el token del link `https://ork3d.com/opinar/<TOKEN>` y guardalo en una variable **sin imprimirlo en logs públicos**:
@@ -736,13 +750,41 @@ Después de validar, la limpieza de esta prueba va en la sección 15.5. Lo que q
 
 ---
 
-## 14. Smoke test de cliente y moderación (pendiente de autorización)
+## 14. Smoke test de cliente y moderación (COMPLETADO)
 
-Se ejecuta después del deploy del frontend. Es la parte del pedido original que valida la página real. Pasos y salidas esperadas:
+Ejecutado desde EC2 después del deploy de `768eaa0` (run `39659217831`, #27: success). Pedido de prueba `SMOKE-TEST-ORK3D`, producto "Prueba técnica ORK3D", categoría `test`, con datos de prueba. Resultados reportados por el operador. No se documentan el token, su hash, la Function URL ni el ID de la reseña.
+
+### 14.1 Resultados
+
+| # | Verificación | Resultado |
+| --- | --- | --- |
+| 1 | Token de prueba creado con la CLI | ✔ |
+| 2 | `GET` del token válido | ✔ `ok=true`, producto correcto, `categoria=test` |
+| 3 | `/opinar/<token>` | ✔ HTTP 200, `noindex`, `no-referrer` |
+| 4 | Envío desde navegador real | ✔ rating 5; aspectos `calidad` y `resultado`; comentario técnico; feedback privado; permiso sí; contacto no; foto JPEG de prueba |
+| 5 | Foto subida con presign | ✔ subida firmada correcta |
+| 6 | `POST /resenas` | ✔ HTTP 200 |
+| 7 | Pantalla de gracias | ✔ apareció, sin errores de consola |
+| 8 | Estado del token después del envío | ✔ `motivo=usado` |
+| 9 | Reseña en `pending` | ✔ exactamente una. Rating 5, categoría `test`, `product_label` correcto, comentario y aspectos correctos, `display_name` generado, `private_feedback` solo interno, `permission_to_publish=true`, foto privada válida. El ID (32 caracteres) no se documenta |
+| 10 | Intentos fallidos con foto | ✔ dos objetos temporales en `pendientes/`, identificados por key exacta y eliminados sin tocar la foto asociada (sección 17.4, hallazgo A) |
+| 11 | Aprobación temporal | ✔ `approved`, `published_at` definido, `photo_public_key` creada, export regenerado, invalidación de CloudFront creada |
+| 12 | Export público (`resenas/publicas.json`) | ✔ items con la allowlist exacta (abajo) y sin campos privados |
+| 13 | Foto pública | ✔ HTTP 200, `Content-Type: image/jpeg`, tamaño correcto, `Cache-Control: public,max-age=31536000,immutable`, SHA-256 igual al de la foto privada, sin EXIF, XMP, IPTC ni GPS detectables |
+| 14 | Limpieza | ✔ reseña, foto privada y foto pública eliminadas; export regenerado; 0 `pending`; token consumido como evidencia de uso único y claim no eliminado (sección 15.5) |
+| 15 | Verificación final | ✔ foto pública del smoke: HTTP 404. Export: `count=0`, `items=[]`. `/opiniones`: `noindex, follow`. Sitemap: 0 referencias a opiniones. Home: 0 referencias a opiniones |
+| 16 | `/opiniones` sin lanzar | ✔ accesible por URL directa, con noindex, fuera del sitemap, sin enlaces y sin reseñas ficticias |
+| 17 | Recursos AWS | ✔ no se crearon recursos nuevos durante el smoke final |
+
+**Allowlist del item público** (`resenas/publicas.json`): `id`, `rating`, `comment`, `aspects`, `display_name`, `category`, `product_label`, `verified`, `photo_url`, `published_at`. Confirmado que **no** expone `token`, `token_hash`, `order_ref`, `private_feedback`, `contact_requested`, `contact`, la clave privada de la foto, datos AWS ni datos internos.
+
+### 14.2 Procedimiento (referencia)
+
+Pasos y salidas esperadas:
 
 1. **Home y páginas**: `https://ork3d.com` sin cambios: `curl -s https://ork3d.com/ | grep -c -i -E 'opiniones|reseña|resenas'` → `0`.
-2. **Token B**: `admin/resenas.sh token crear --pedido SMOKE-TEST-ORK3D --producto smoke-test --categoria test --producto-label "Prueba técnica" --dias 1`. Abrí el link en escritorio y en celular.
-3. **Página** `https://ork3d.com/opinar/<TOKEN_B>`: carga el formulario con el producto "Prueba técnica". Sin scripts de terceros, sin fuentes externas. `noindex` y `referrer no-referrer` en el HTML.
+2. **Token B**: `admin/resenas.sh token crear --pedido SMOKE-TEST-ORK3D --producto smoke-test --categoria test --producto-label "Prueba técnica ORK3D" --dias 1`. Abrí el link en escritorio y en celular.
+3. **Página** `https://ork3d.com/opinar/<TOKEN_B>`: carga el formulario con el producto "Prueba técnica ORK3D". Sin scripts de terceros, sin fuentes externas. `noindex` y `referrer no-referrer` en el HTML.
 4. **Formulario**: 5 estrellas; nombre `Prueba ORK3D`; un aspecto; comentario `Reseña técnica de prueba. No publicar.`; feedback privado `Smoke test técnico.`; sin contacto; permiso marcado.
 5. **Foto**: subir un JPEG de prueba (de tu máquina). Esperado: "Foto lista."
 6. **Envío**: esperado: pantalla "Gracias por tu opinión".
@@ -899,10 +941,13 @@ Objetivo: no dejar reseñas de prueba publicadas, ni en el export, ni en version
    #   esperado: el count sin la reseña de prueba; "Prueba ORK3D" no aparece
    ```
 
-**Qué queda y por qué:** nada de la prueba en los buckets (sin reseñas, tokens ni claims de prueba), y el export sin
-la reseña. Los logs de CloudWatch quedan 30 días: contienen IDs y prefijos de hash, pero no tokens completos ni texto
-de reseñas. Si decidís conservar el claim `claims/<hash>.json` como traza de auditoría, dejalo **solo** ese archivo,
-con el token ya borrado, y documentá la decisión. Por defecto no se conserva nada.
+**Qué quedó en el smoke productivo (decisión registrada):** se borraron la reseña, la foto privada, la foto pública y los
+objetos temporales de intentos fallidos (sección 17.4). El export se regeneró y quedó con `count=0`. El token queda
+consumido como evidencia de uso único (estado `usado` para la API) y su claim no se eliminó. Esta decisión se aparta del
+default de este paso, que no conserva nada, y de la opción documentada, que pide dejar solo el claim con el registro del
+token borrado. Queda registrada aquí.
+
+Los logs de CloudWatch quedan 30 días: contienen IDs y prefijos de hash, pero no tokens completos ni texto de reseñas.
 
 ### 15.6 Revertir el frontend
 
@@ -932,7 +977,7 @@ excluye `resenas/`, `api/`, `admin/`, `dev/` y `docs/`, así que las reseñas pu
 - No volver a ejecutar `infra/resenas-setup.sh` con `DRY_RUN=0` sin autorización explícita: la infraestructura ya existe.
 - No access keys en archivos, en comandos ni en el repo.
 - No pegar account IDs, distribution IDs ni URLs reales en el repo ni en issues públicos.
-- No cambiar `config.js` con una URL ficticia. Esperá la Function URL real.
+- No cambiar `config.js` con una URL ficticia. La Function URL real ya está en `config.js` desde el commit `768eaa0`.
 - No enlazar `/opiniones`, ni agregarla al sitemap, ni tocar la home en este despliegue.
 - No crear reseñas de prueba visibles públicamente. Si una prueba aprueba una reseña, la limpieza (15.5) es obligatoria.
 
@@ -941,7 +986,7 @@ excluye `resenas/`, `api/`, `admin/`, `dev/` y `docs/`, así que las reseñas pu
 ## 17. Hallazgos del despliegue real
 
 Estos puntos salieron al crear la infraestructura en AWS desde la máquina del operador. Cada uno quedó corregido en el
-script, en las políticas, en los tests o en este runbook. El frontend no se desplegó y `config.js` no cambió.
+script, en las políticas, en los tests o en este runbook. Los hallazgos del smoke productivo están en la sección 17.4.
 
 ### 17.1 Hallazgos y correcciones
 
@@ -962,11 +1007,20 @@ script, en las políticas, en los tests o en este runbook. El frontend no se des
 
 ### 17.3 Pendiente
 
-- **13.2**: prueba end-to-end de atomicidad con la API. Crea datos de producción: requiere autorización.
-- **Sección 14**: smoke test de cliente y moderación. Va después del deploy del frontend.
-- **`config.js`** con la Function URL real: commit aparte, después de autorizar el deploy del frontend.
+- **13.2**: prueba end-to-end de atomicidad con la API (dos envíos simultáneos). No se ejecutó: crea datos de producción y requiere autorización. El uso único secuencial sí quedó validado (sección 14.1).
 - **Sección 12**: si `ork3d.com` pasa por el proxy de Cloudflare, no está verificado.
 - **Safari/iOS**: confirmar que el canvas no agrega metadatos.
 - **Límite por IP**: no implementado (`docs/resenas/README.md`, pendientes).
 - **Export**: relee todas las reseñas. Revisar antes de ~1.000 reseñas.
 - **Script de infraestructura en macOS y bash 3.2**: no probado.
+
+### 17.4 Hallazgos del smoke productivo
+
+**A. Objetos temporales en `pendientes/` tras un intento fallido.** Un envío que falla después de subir la foto puede dejar
+un objeto temporal en `pendientes/`. El lifecycle de `pendientes/` lo elimina a los 2 días (sección 10, S3). En pruebas
+manuales se puede limpiar por **key exacta** con el helper de la sección 15.4, nunca por prefijo. En el smoke se borraron
+dos objetos de este tipo sin tocar la foto asociada al envío exitoso.
+
+**B. Selección de estrellas en tests automatizados.** Las estrellas son radios superpuestos por el estilo. Para seleccionar
+una en un test, hacer click sobre el `label` asociado al rating (`label[for="rating-N"]`) en lugar de llamar `check()` sobre
+el radio. Esto solo cambia la automatización: el diseño y el comportamiento no cambian.
