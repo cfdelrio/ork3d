@@ -57,7 +57,7 @@ aws s3 cp regalos-empresariales-fin-de-ano.html "s3://${BUCKET}/regalos-empresar
 # CSS / JS / SVG: cache larga
 aws s3 cp assets/ "s3://${BUCKET}/assets/" \
   --recursive \
-  --cache-control "public, max-age=31536000, immutable" \
+  --cache-control "public, max-age=300, must-revalidate" \
   --metadata-directive REPLACE
 
 aws s3 cp config.js "s3://${BUCKET}/config.js" \
