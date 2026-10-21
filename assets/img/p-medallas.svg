@@ -5,7 +5,7 @@
   <path d="M75,10 L50,80 L75,95 L110,85 Z" fill="#dc2626"/>
   <path d="M125,10 L150,80 L125,95 L90,85 Z" fill="#3b82f6"/>
   <circle cx="100" cy="125" r="55" fill="url(#g)" stroke="#7d5c1f" stroke-width="3"/>
-  <circle cx="100" cy="125" r="40" fill="#0a0a0a"/>
-  <text x="100" y="120" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="14" font-weight="900">3D</text>
+  <circle cx="100" cy="125" r="40" fill="#191919"/>
+  <text x="100" y="120" text-anchor="middle" fill="#D6F17C" font-family="Inter,Arial" font-size="14" font-weight="900">3D</text>
   <text x="100" y="138" text-anchor="middle" fill="#fff" font-family="Inter,Arial" font-size="6" font-weight="600">ORK3D</text>
 </svg>

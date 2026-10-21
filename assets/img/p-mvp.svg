@@ -5,7 +5,7 @@
   <path d="M40,30 L60,30 L75,100 L55,110 Z" fill="#3b82f6"/>
   <path d="M160,30 L140,30 L125,100 L145,110 Z" fill="#3b82f6"/>
   <rect x="30" y="80" width="140" height="50" rx="6" fill="url(#g)" stroke="#7d5c1f" stroke-width="2"/>
-  <text x="100" y="105" text-anchor="middle" fill="#0a0a0a" font-family="Inter,Arial" font-size="22" font-weight="900">MVP</text>
-  <text x="100" y="120" text-anchor="middle" fill="#0a0a0a" font-family="Inter,Arial" font-size="8" font-weight="700">DE LA FECHA</text>
+  <text x="100" y="105" text-anchor="middle" fill="#191919" font-family="Inter,Arial" font-size="22" font-weight="900">MVP</text>
+  <text x="100" y="120" text-anchor="middle" fill="#191919" font-family="Inter,Arial" font-size="8" font-weight="700">DE LA FECHA</text>
   <rect x="50" y="135" width="100" height="40" fill="#1a1a1a" stroke="#333"/>
 </svg>

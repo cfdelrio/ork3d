@@ -7,5 +7,5 @@
   <path d="M160,40 Q185,60 165,110 Q145,130 130,125" stroke="url(#g)" stroke-width="10" fill="none" stroke-linecap="round"/>
   <path d="M45,40 L155,40 L145,140 Q100,160 55,140 Z" fill="url(#g)"/>
   <rect x="80" y="155" width="40" height="14" fill="url(#g)"/>
-  <text x="100" y="172" text-anchor="middle" fill="#c8ff1c" font-family="Inter,Arial" font-size="8" font-weight="900">CAMPEÓN</text>
+  <text x="100" y="172" text-anchor="middle" fill="#D6F17C" font-family="Inter,Arial" font-size="8" font-weight="900">CAMPEÓN</text>
 </svg>
