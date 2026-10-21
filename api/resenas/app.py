@@ -1,22 +1,29 @@
-"""ORK3D · Reseñas · API mínima (AWS Lambda, Python 3.12, sin dependencias externas).
+"""ORK3D · Reseñas · API pública (AWS Lambda, Python 3.12).
 
 Rutas (Function URL, sin prefijo):
   GET  /tokens/{token}  → estado del token (ok | invalido | vencido | usado | revocado)
   POST /presign         → presigned POST para subir una foto a pendientes/
   POST /resenas         → crea la reseña en estado "pending" y consume el token
 
-Datos: bucket privado (RESENAS_BUCKET). Ver docs/resenas/README.md.
-Nunca se loguea un token completo, una IP ni el contenido de una reseña.
-boto3 viene incluido en el runtime de Lambda; los tests usan un fake (api/resenas/fakes.py).
+Datos: bucket privado (RESENAS_BUCKET). Ver docs/resenas/README.md y V2-ADMIN.md.
+Logs: solo review_id, operación y resultado (nucleo/registro.py). Nunca un token, su hash
+(ni prefijo), un comentario, feedback privado, contacto o correo.
+Notificación (V2): si RESENAS_NOTIFY_ENABLED es "true", tras guardar una reseña pending se
+envía un aviso al moderador. Es un efecto secundario: si falla, la reseña queda guardada.
+boto3 viene incluido en el runtime de Lambda; los tests usan fakes (api/resenas/fakes.py).
 """
 import base64
 import datetime as _dt
-import hashlib
 import json
-import logging
 import os
 import re
 import uuid
+
+from nucleo import correo as _correo
+from nucleo import registro as _registro
+from nucleo import tokens as _tokens
+from nucleo.almacen import Almacen
+from nucleo.jpeg import jpeg_sin_metadatos  # noqa: F401  (V1 la exponía desde este módulo)
 
 MAX_BODY_BYTES = 8192
 TOKEN_RE = re.compile(r'[A-Za-z0-9_-]{32}')
@@ -32,8 +39,8 @@ NAME_RE = re.compile(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑ
 PHOTO_KEY_RE = re.compile(r'pendientes/([0-9a-f]{64})/([0-9a-f]{32})\.jpg')
 _CONTROL = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
-log = logging.getLogger('resenas')
-log.setLevel(logging.INFO)
+token_hash = _tokens.hash_token  # V1: mismo nombre, misma regla (sha256 hex del token)
+_log = _registro.evento
 
 
 class Invalid(Exception):
@@ -52,14 +59,6 @@ def _iso(dt):
 
 def _parse_iso(s):
     return _dt.datetime.strptime(s, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=_dt.timezone.utc)
-
-
-def token_hash(token):
-    return hashlib.sha256(token.encode('utf-8')).hexdigest()
-
-
-def _log(ev, **fields):
-    log.info(json.dumps({'ev': ev, **fields}, ensure_ascii=False))
 
 
 def _error_code(exc):
@@ -170,63 +169,22 @@ def parse_review(p):
     }
 
 
-# Segmentos JPEG que puede tener una foto nuestra: cabeceras y tablas de imagen, nada más.
-# APP0 solo si es JFIF y APP2 solo si es perfil de color ICC (no lleva datos personales).
-# Cualquier otro APPn (EXIF con GPS, XMP, IPTC) y COM se rechazan.
-SEGMENTOS_JPEG = {0xC0, 0xC1, 0xC2, 0xC4, 0xDA, 0xDB, 0xDD}  # SOF0-2, DHT, SOS, DQT, DRI
-REINICIOS = set(range(0xD0, 0xD8))
-
-
-def jpeg_sin_metadatos(datos):
-    """True si `datos` es un JPEG que solo tiene segmentos de imagen (y JFIF).
-
-    Recorre los marcadores sin decodificar la imagen. La foto pública no puede llevar
-    datos ocultos aunque el cliente se salte la recodificación del navegador.
-    """
-    if datos[:2] != b'\xff\xd8':
-        return False
-    pos, n = 2, len(datos)
-    while pos + 1 < n:
-        if datos[pos] != 0xFF:
-            return False
-        marcador = datos[pos + 1]
-        if marcador == 0xFF:  # relleno
-            pos += 1
-            continue
-        pos += 2
-        if marcador == 0xD9:  # EOI: tiene que ser el último byte; nada puede ir después
-            return pos == n
-        if marcador == 0x01 or marcador in REINICIOS:  # sin longitud
-            continue
-        if pos + 2 > n:
-            return False
-        largo = int.from_bytes(datos[pos:pos + 2], 'big')
-        if largo < 2 or pos + largo > n:
-            return False
-        if marcador == 0xE0:
-            if not datos[pos + 2:pos + largo].startswith(b'JFIF\x00'):
-                return False
-        elif marcador == 0xE2:
-            if not datos[pos + 2:pos + largo].startswith(b'ICC_PROFILE\x00'):
-                return False
-        elif marcador not in SEGMENTOS_JPEG:
-            return False
-        pos += largo
-        if marcador == 0xDA:  # SOS: los datos comprimidos siguen hasta el próximo marcador
-            while pos + 1 < n and not (datos[pos] == 0xFF and datos[pos + 1] != 0x00
-                                       and datos[pos + 1] not in REINICIOS):
-                pos += 1
-    return False
-
-
 # ── Servicio ──────────────────────────────────────────────────────────────
 
 class Service:
-    def __init__(self, s3, bucket, allowed_origin, google_review_url=None):
+    def __init__(self, s3, bucket, allowed_origin, google_review_url=None, *,
+                 correo=None, base_url=None, origen_correo=None, destino_correo=None):
         self.s3 = s3
         self.bucket = bucket
         self.allowed_origin = allowed_origin
         self.google_review_url = google_review_url
+        self._almacen = Almacen(s3)
+        # Notificación: solo si hay servicio de correo y las tres direcciones/URL configuradas.
+        self.correo = correo
+        self.base_url = base_url
+        self.origen_correo = origen_correo
+        self.destino_correo = destino_correo
+        self.notificar = bool(correo and base_url and origen_correo and destino_correo)
 
     # --- acceso a S3 -------------------------------------------------------
     def _get_json(self, key):
@@ -259,7 +217,7 @@ class Service:
         h = token_hash(token)
         rec = self._get_json(f'tokens/{h}.json')
         if rec is None:
-            _log('token_invalido', th=h[:8])
+            _log('token_invalido')
             return None, 'invalido'
         if rec.get('revoked'):
             return rec, 'revocado'
@@ -295,7 +253,7 @@ class Service:
                         ['content-length-range', PHOTO_MIN_BYTES, PHOTO_MAX_BYTES],
                         {'key': key}],
             ExpiresIn=PRESIGN_TTL)
-        _log('presign', th=h[:8], ext=ext)
+        _log('presign')
         return 200, {'ok': True, 'url': post['url'], 'fields': post['fields'],
                      'key': key, 'max_bytes': PHOTO_MAX_BYTES}
 
@@ -331,7 +289,7 @@ class Service:
                 return 400, {'ok': False, 'error': 'validacion', 'campos': {'photo_key': 'La foto tiene un tamaño no permitido.'}}
             datos = self.s3.get_object(Bucket=self.bucket, Key=photo_key)['Body'].read()
             if not jpeg_sin_metadatos(datos):
-                _log('photo_rechazada', th=h[:8])
+                _log('photo_rechazada')
                 return 400, {'ok': False, 'error': 'validacion', 'campos': {'photo_key': 'La foto no es un JPEG válido o trae metadatos (EXIF, comentarios). Quitalos y volvé a subirla.'}}
 
         review_id = uuid.uuid4().hex
@@ -355,7 +313,7 @@ class Service:
                            IfNoneMatch='*')
         except Exception as exc:
             if _is_precondition(exc):
-                _log('claim_conflicto', th=h[:8])
+                _log('claim_conflicto')
                 return 409, {'ok': False, 'motivo': 'usado'}
             raise
 
@@ -366,11 +324,23 @@ class Service:
             try:
                 self.s3.delete_object(Bucket=self.bucket, Key=f'claims/{h}.json')
             except Exception:
-                _log('claim_rollback_fallido', th=h[:8])
+                _log('claim_rollback_fallido')
             raise
 
-        _log('resena_creada', th=h[:8], id=review_id, rating=data['rating'], foto=bool(photo_key))
+        _log('resena_creada', review_id=review_id, foto=bool(photo_key))
+        # La reseña ya existe. El aviso es un efecto secundario: nunca cambia la respuesta.
+        self._notificar(review)
         return 200, {'ok': True, 'id': review_id, 'google_url': self.google_review_url}
+
+    def _notificar(self, review):
+        if not self.notificar:
+            return
+        try:
+            _correo.notificar_resena(self.correo, self._almacen, self.bucket, review,
+                                     base_url=self.base_url, origen=self.origen_correo,
+                                     destino=self.destino_correo, ahora=_now())
+        except Exception as exc:  # defensa: notificar_resena ya no levanta, pero el hook tampoco
+            _log('aviso_fallido', review_id=review.get('id'), error=type(exc).__name__)
 
     # --- ruteo -------------------------------------------------------------
     def route(self, method, path, raw_body):
@@ -413,11 +383,20 @@ def _service():
     global _SVC
     if _SVC is None:
         import boto3  # disponible en el runtime de Lambda; no se importa en los tests
+        from botocore.config import Config
+        correo_svc = None
+        if os.environ.get('RESENAS_NOTIFY_ENABLED', 'false').lower() == 'true':
+            cfg = Config(connect_timeout=3, read_timeout=3, retries={'max_attempts': 2})
+            correo_svc = _correo.SESCorreo(boto3.client('ses', config=cfg))
         _SVC = Service(
             s3=boto3.client('s3'),
             bucket=os.environ['RESENAS_BUCKET'],
             allowed_origin=os.environ.get('ALLOWED_ORIGIN', 'https://ork3d.com'),
             google_review_url=os.environ.get('GOOGLE_REVIEW_URL') or None,
+            correo=correo_svc,
+            base_url=os.environ.get('RESENAS_ADMIN_BASE_URL') or None,
+            origen_correo=os.environ.get('RESENAS_FROM_EMAIL') or None,
+            destino_correo=os.environ.get('RESENAS_ADMIN_EMAIL') or None,
         )
     return _SVC
 
@@ -440,7 +419,7 @@ def handler(event, context=None):
         return svc.response(400, {'ok': False, 'error': 'json'})
     try:
         status, payload = svc.route(method, path, raw_body)
-    except Exception:  # no se loguea el detalle: podría contener datos
-        _log('error_interno', ruta=path)
+    except Exception as exc:  # sin detalle: podría contener datos. La ruta va como plantilla.
+        _log('error_interno', ruta=_registro.ruta_plantilla(path), error=type(exc).__name__)
         status, payload = 500, {'ok': False, 'error': 'interno'}
     return svc.response(status, payload)
