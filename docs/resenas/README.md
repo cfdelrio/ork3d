@@ -55,7 +55,7 @@ No hay base de datos: el volumen es de decenas de reseñas por mes y el CLI lee 
 - **Logs**: no se registran tokens completos, IPs ni textos de reseña. Retención de 30 días.
 - **Nombre real**: no se guarda. Solo se guarda el nombre mostrado (`Ana G.`, `Ana` o `Cliente de ORK3D`).
 - **Página `/opinar`**: `noindex`, `referrer: no-referrer` (el token no sale en el Referer) y sin fuentes ni scripts de terceros. No carga `main.js`, porque ese script envía la ruta a analytics.
-- **Retención**: rechazadas y ocultas, 90 días (`mantenimiento`). Fotos pendientes, 2 días (lifecycle del bucket). Versiones anteriores, 30 días.
+- **Retención**: las rechazadas se borran a los 90 días (`mantenimiento`). Las ocultas se quedan hasta que las borres con `borrar`. Fotos pendientes, 2 días (lifecycle del bucket). Versiones anteriores, 30 días.
 
 ## Despliegue (una vez)
 
@@ -92,8 +92,8 @@ Códigos de salida: 0 ok · 1 uso incorrecto o error local · 2 estado inválido
 
 - **Ocultar** saca una reseña aprobada del sitio sin borrarla. Es la respuesta a un pedido de quitarla.
 - **Revocar** invalida un enlace que ya se mandó.
-- **Mantenimiento** borra rechazadas y ocultas con más de 90 días. Corré `--dry-run` antes de `--yes`.
-- **Backup** copia el bucket privado completo a un directorio local. Hacelo antes de cambios grandes.
+- **Mantenimiento** borra las rechazadas de más de 90 días. Las ocultas no se tocan: se borran a mano con `borrar`. Corré `--dry-run` antes de `--yes`.
+- **Backup** copia el bucket privado completo a un directorio local. Hacelo antes de cambios grandes. Incluye datos de contacto y feedback privado: guardalo cifrado y fuera del repo.
 
 ## Costos
 
