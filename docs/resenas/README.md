@@ -130,6 +130,8 @@ de por 1.000. Verificar en la página oficial antes de aprobar.
 
 ## Despliegue (una vez, más adelante; no ejecutado)
 
+Procedimiento operativo completo (pre-flight, dry-run, ejecución real, verificación, smoke test y rollback): `docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md`.
+
 1. `infra/resenas-setup.sh`: dry-run por defecto. Imprime los 7 recursos, su costo y cada comando, sin tocar AWS.
 2. `DRY_RUN=0 infra/resenas-setup.sh`, desde tu máquina con credenciales de administrador. Es idempotente.
    Crea el bucket privado, el rol, la Lambda, la Function URL, la concurrencia, los logs y la regla `/opinar/*`.

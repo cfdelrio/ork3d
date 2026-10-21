@@ -96,6 +96,8 @@ real contra la lógica real de la Lambda sobre esos mismos archivos.
 
 ## Puesta en marcha (más adelante, no ejecutada)
 
+Runbook operativo completo, con pre-flight, verificaciones y rollback: `docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md`.
+
 1. Revisar el dry-run: `infra/resenas-setup.sh`. Muestra los recursos y su costo, sin tocar AWS.
 2. Crear los recursos con `DRY_RUN=0 infra/resenas-setup.sh`, desde una cuenta con permisos de administrador.
 3. Asignar `infra/resenas/admin-permisos.json` al usuario o rol que modera, reemplazando los placeholders.
