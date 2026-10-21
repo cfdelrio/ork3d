@@ -60,6 +60,21 @@ aws s3 cp assets/ "s3://${BUCKET}/assets/" \
   --cache-control "public, max-age=300, must-revalidate" \
   --metadata-directive REPLACE
 
+# AVIF y WebP: Content-Type explícito por extensión; no depender del mimetypes del runner
+aws s3 cp assets/ "s3://${BUCKET}/assets/" \
+  --recursive \
+  --exclude "*" --include "*.avif" \
+  --content-type "image/avif" \
+  --cache-control "public, max-age=300, must-revalidate" \
+  --metadata-directive REPLACE
+
+aws s3 cp assets/ "s3://${BUCKET}/assets/" \
+  --recursive \
+  --exclude "*" --include "*.webp" \
+  --content-type "image/webp" \
+  --cache-control "public, max-age=300, must-revalidate" \
+  --metadata-directive REPLACE
+
 aws s3 cp config.js "s3://${BUCKET}/config.js" \
   --cache-control "public, max-age=300, must-revalidate" \
   --content-type "application/javascript; charset=utf-8" \
