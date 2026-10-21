@@ -6,6 +6,7 @@ Sale con 1 si alguna validación falla. No hay validaciones que se salteen: si f
 herramienta (node, bash) la validación falla y lo dice.
 """
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -61,7 +62,8 @@ def validar_javascript():
 
 def validar_shell():
     archivos = ['deploy.sh', 'verify.sh', 'infra/setup.sh', 'infra/teardown.sh', 'infra/resenas-setup.sh',
-                'infra/admin-setup.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh', 'admin/tests/fixtures.sh']
+                'infra/admin-setup.sh', 'infra/smoke-if-match.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh',
+                'admin/tests/fixtures.sh']
     for rel in archivos:
         r = correr(['bash', '-n', rel])
         comprobar(f'Shell: sintaxis de {rel}', r.returncode == 0, r.stderr.strip())
@@ -291,6 +293,29 @@ def validar_admin_v2():
               and 'host' not in cabeceras)
 
 
+# ── Preflight y smoke de V2 (EC2): el preflight solo lee; el smoke es el único escritor y pide permiso ──
+def validar_preflight_v2():
+    preflight = 'infra/preflight_v2.py'
+    r = correr([sys.executable, '-m', 'py_compile', preflight])
+    comprobar('Preflight V2: compila infra/preflight_v2.py', r.returncode == 0, r.stderr.strip())
+    fuente = leer(preflight)
+    llamadas = set(re.findall(r"\bro\(\s*'([a-z0-9]+)',\s*'([a-z0-9-]+)'", fuente))
+    spec = importlib.util.spec_from_file_location('preflight_v2', os.path.join(ROOT, preflight))
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    fuera = sorted(f'{s} {o}' for s, o in llamadas if not modulo.permitida(s, o))
+    comprobar('Preflight V2: toda llamada literal a AWS está en la lista de solo lectura',
+              len(llamadas) > 20 and not fuera, str(fuera)[:200])
+    comprobar('Preflight V2: subprocess solo aparece dentro de ro(), la única puerta a la CLI',
+              fuente.count('subprocess.run(') == 1)
+    smoke = leer('infra/smoke-if-match.sh')
+    comprobar('Smoke V2: escribe solo bajo admin/smoke-if-match/', 'PREFIJO="admin/smoke-if-match/"' in smoke)
+    # Entorno vacío: sin ALLOW_SMOKE_WRITE el smoke debe abortar con 3 antes de tocar AWS.
+    r = correr(['env', '-i', 'PATH=' + os.environ.get('PATH', ''), 'bash', 'infra/smoke-if-match.sh'])
+    comprobar('Smoke V2: sin ALLOW_SMOKE_WRITE=1 aborta con código 3 antes de llamar a AWS',
+              r.returncode == 3 and 'ABORTA' in r.stderr, f'rc={r.returncode} {r.stderr.strip()[:200]}')
+
+
 def main():
     validar_javascript()
     validar_shell()
@@ -301,6 +326,7 @@ def main():
     validar_iam()
     validar_despliegue()
     validar_admin_v2()
+    validar_preflight_v2()
     print(f'\nValidaciones: {aprobadas} PASS, {len(fallos)} FAIL')
     sys.exit(1 if fallos else 0)
 
