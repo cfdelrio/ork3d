@@ -5,6 +5,26 @@ están cerrados. El smoke productivo se ejecutó y verificó desde el entorno EC
 existe por URL directa, con noindex, fuera del sitemap y sin enlaces desde home ni navegación. Lo que sigue abierto está en
 "Pendientes reales". El procedimiento y los hallazgos están en `docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md`.
 
+## Estado de la V2 (panel admin): implementada localmente, no desplegada
+
+**V2 admin implementada y validada localmente. AWS y producción todavía no modificados.**
+
+| Punto | Estado |
+| --- | --- |
+| Contrato y decisiones | `docs/resenas/V2-ADMIN.md` (incluye las desviaciones con la CLI) |
+| Núcleo reusable (`api/resenas/nucleo/`) | ✔ local, con tests |
+| API admin (`/admin/api/*`, Lambda `ork3d-resenas-admin`) | ✔ local, con tests |
+| Acceso por magic link, sesión de 8 h, CSRF y rate limit | ✔ local, con tests |
+| Aviso por correo de reseña nueva (detrás de `RESENAS_NOTIFY_ENABLED=false`) | ✔ local, con tests. Sin SES real |
+| Panel web `/admin/resenas` y `/admin/entrar` | ✔ local, E2E de 27 casos en Chromium |
+| Scripts de infraestructura | ✔ solo DRY_RUN (`infra/admin-setup.sh`). No se ejecutó ningún comando de AWS |
+| CLI `admin/resenas.sh` | Sin cambios (opción A). Paridad probada sobre el mismo almacén |
+| Producción | No modificada: sin deploy, sin SES, sin DNS, sin IAM, sin CloudFront |
+
+Pendientes antes de desplegar (no están hechos): 2FA en el buzón de moderación, verificación de
+`If-Match` contra S3 real, verificación de OAC con Function URL `AWS_IAM`, y la identidad SES de
+producción. Lista completa en la sección "Pendientes de V2" de este archivo y en el runbook (sección 18).
+
 ## Estado de la V1
 
 | Punto | Estado |
@@ -29,9 +49,12 @@ existe por URL directa, con noindex, fuera del sitemap y sin enlaces desde home 
 | Moderación (CLI) | `admin/resenas.sh`, `admin/README.md` | 97 casos del CLI, más un recorrido manual de 25 comandos |
 | Listado público `/opiniones` | `opiniones.html`, `assets/js/resenas-publicas.js` | Publicado, **sin enlazar y con noindex**: no lanzado (Etapa 4 pendiente) |
 | Infraestructura | `infra/resenas-setup.sh`, `infra/resenas/*.json`, `infra/tests` | 18 tests del script y las políticas, sin AWS. Dry-run: 19 llamadas simuladas, 0 reales. Ejecutada en AWS desde la máquina del operador (runbook, sección 17) |
-| Validaciones estáticas | `dev/validar.py` | 65 comprobaciones (sintaxis, HTML, JSON, políticas, IAM, script de despliegue) |
+| Validaciones estáticas | `dev/validar.py` | 134 comprobaciones (sintaxis, HTML, JSON, políticas, IAM, script de despliegue, panel admin) |
+| Núcleo, API admin, correo, privacidad y paridad CLI (V2) | `api/resenas/test_*.py` | 194 casos nuevos. Ver la tabla de Pruebas |
+| Panel admin (V2) | `admin-web/`, `assets/js/admin-*.js`, `assets/css/admin.css`, `dev/e2e/admin.e2e.js` | 27 casos E2E |
+| Infraestructura del panel (V2) | `infra/admin-setup.sh`, `infra/resenas/admin-*.json`, `infra/tests/test_admin_setup.py` | 22 casos nuevos, sin AWS |
 
-Suite completa: `dev/suite.sh`. Sale con 1 si alguna capa falla. Resultado actual: **280 casos, 0 fallos, 0 omitidos**.
+Suite completa: `dev/suite.sh`. Sale con 1 si alguna capa falla. Resultado actual: ver la tabla de Pruebas.
 
 ## Flujo
 
@@ -171,11 +194,19 @@ Cinco capas, todas obligatorias:
 
 | Capa | Comando | Resultado actual |
 | --- | --- | --- |
-| API y contrato CLI/API | `python3 -m unittest discover -s api/resenas -v` | 76 OK, 0 fallos, 0 omitidos |
-| Infra: script y políticas (sin AWS) | `python3 -m unittest discover -s infra/tests -v` | 18 OK, 0 fallos, 0 omitidos |
+| API, contrato CLI/API, núcleo, admin, correo, privacidad y paridad | `python3 -m unittest discover -s api/resenas -v` | 270 OK (76 de V1 + 194 de V2) |
+| Infra: script y políticas (sin AWS) | `python3 -m unittest discover -s infra/tests -v` | 40 OK (18 de V1 + 22 de V2) |
 | CLI de moderación | `bash admin/tests/run_tests.sh` | 97 PASS, 0 FAIL |
-| Navegador (Chromium) | `node dev/e2e/opinar.e2e.js` | 24/24 |
-| Validaciones estáticas | `python3 dev/validar.py` | 65 PASS, 0 FAIL |
+| Navegador: `/opinar` | `node dev/e2e/opinar.e2e.js` | 24/24 |
+| Navegador: panel admin | `node dev/e2e/admin.e2e.js` | 27/27 |
+| Validaciones estáticas | `python3 dev/validar.py` | 134 PASS, 0 FAIL (65 de V1 y 69 de V2) |
+
+Tests de V2 en la API (`api/resenas/`): `test_nucleo.py` (tokens, transiciones, precondiciones de S3, lock
+del export, allowlist, fotos), `test_admin_auth.py` (magic link, código de un solo uso, sesión, cookie, CSRF,
+rate limit, GET sin efectos), `test_admin_api.py` (invitaciones, bandeja, detalle, foto, moderación,
+concurrencia, export, reenvío, errores), `test_correo.py` (contenido, escape, SES, hook de la Lambda pública),
+`test_privacidad.py` (logs sin secretos sobre un flujo completo, export, correos fijos, reglas del frontend),
+`test_paridad_cli.py` (CLI y web sobre el mismo almacén).
 
 `test_contrato.py` corre el CLI real contra el mismo directorio de archivos que usa la lógica real de la
 Lambda por `app.handler`. No mockea el contrato. El almacenamiento es un adaptador de archivos, que imita
@@ -184,7 +215,14 @@ el comportamiento de S3 que usamos.
 `dev/serve.py` es el servidor local del E2E: sirve el sitio con las reglas de CloudFront y usa `app.py` con
 un S3 en memoria. `dev/` está excluido del deploy.
 
-## Pendientes reales
+## Pendientes de V2 (antes de desplegar)
+
+Ninguno de estos puntos se ejecutó ni se verificó contra AWS en esta etapa:
+1. **2FA** en el buzón que recibe `RESENAS_ADMIN_EMAIL`. Es requisito operativo: el acceso al panel depende de ese buzón.
+2. **`If-Match` en S3 real**: dos escrituras concurrentes sobre la misma reseña, una gana y la otra recibe 412. Los tests usan un fake.
+3. **OAC con Function URL `AWS_IAM`**: la sintaxis de `create-function-url-config`, `add-permission` y la behavior de CloudFront, verificadas en la cuenta.
+4. **Identidad SES de producción**: `RESENAS_FROM_EMAIL` como dirección o como dominio (la política de `ses:SendEmail` cambia según eso), salida del sandbox y DKIM/DMARC.
+5. **Smoke de producción** según el plan de la sección 18 del runbook.
 
 Pendientes (no cierran el smoke de la V1):
 1. **Safari/iOS**: confirmar que el canvas no agrega metadatos. Si los agregara, la foto de esos clientes se rechazaría.

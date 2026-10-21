@@ -1021,3 +1021,112 @@ dos objetos de este tipo sin tocar la foto asociada al envío exitoso.
 **B. Selección de estrellas en tests automatizados.** Las estrellas son radios superpuestos por el estilo. Para seleccionar
 una en un test, hacer click sobre el `label` asociado al rating (`label[for="rating-N"]`) en lugar de llamar `check()` sobre
 el radio. Esto solo cambia la automatización: el diseño y el comportamiento no cambian.
+
+---
+
+## 18. V2 · panel admin (implementada localmente; no desplegada)
+
+**Estado: V2 admin implementada y validada localmente. AWS y producción todavía no modificados.**
+Esta sección es un plan. Ningún comando de esta sección se ejecutó contra AWS. El contrato está en
+`docs/resenas/V2-ADMIN.md`.
+
+Qué agrega la V2: una Lambda admin `ork3d-resenas-admin` (Python 3.12, Function URL con `AWS_IAM`, detrás
+de CloudFront por OAC en `/admin/api/*`), las páginas `/admin/resenas` y `/admin/entrar`, el envío de un
+aviso por SES cuando entra una reseña pending (detrás de `RESENAS_NOTIFY_ENABLED=false`), una regla de
+2 días para `admin/`, y el paquete `nucleo/` que la Lambda pública también necesita.
+
+### 18.1 Antes de cualquier `DRY_RUN=0` (todo pendiente)
+
+| # | Punto | Por qué bloquea | Cómo se verifica |
+| --- | --- | --- | --- |
+| 1 | 2FA en el buzón de `RESENAS_ADMIN_EMAIL` | El acceso al panel depende de ese buzón | Confirmar en la cuenta de correo del moderador |
+| 2 | `If-Match` en S3 real | La moderación concurrente depende de ETag | Dos `put-object --if-match` sobre la misma clave: una gana, la otra recibe `PreconditionFailed`; el objeto conserva el contenido de la que ganó |
+| 3 | OAC con Function URL `AWS_IAM` | Sin esto `/admin/api/*` no llega a la Lambda admin | Crear la Function URL en una Lambda de prueba, `create-function-url-config --auth-type AWS_IAM`, y confirmar con CloudFront (OAC) que la solicitud firmada llega. Si no es viable, parar y reportar: no cambiar el diseño en silencio |
+| 4 | Identidad SES de `RESENAS_FROM_EMAIL` | La política de `ses:SendEmail` usa `identity/<correo>`; si se verifica un dominio, cambia el ARN | Decisión explícita. Salir del sandbox de SES si hace falta |
+| 5 | DKIM y DMARC | Sin ellos el aviso puede caer en spam | Revisar la configuración DNS antes de activar el aviso. No se toca DNS en esta etapa |
+
+### 18.2 Dry-run (sin AWS)
+
+```bash
+# Desde la raíz del repo. Con DRY_RUN=1 (valor por defecto) el script solo imprime lo que correría.
+DRY_RUN=1 infra/admin-setup.sh
+python3 -m unittest discover -s infra/tests -v      # 40 casos: 18 de V1, 22 de V2
+python3 dev/validar.py                               # 134 comprobaciones
+```
+
+El script no llama a `aws`, `curl` ni `wget` en dry-run. El test de infra lo comprueba con binarios falsos que
+registran cada llamada.
+
+### 18.3 Orden propuesto (NO ejecutado)
+
+Cada paso queda en el script como `PLAN` o como `dry-run`. Los pasos marcados PLAN necesitan una autorización
+explícita, y su sintaxis exacta se verifica en la cuenta antes del deploy.
+
+| Paso | Recurso | Comando de referencia | Estado |
+| --- | --- | --- | --- |
+| 1 | Rol y política de la Lambda admin | `aws iam create-role` y `put-role-policy` con `infra/resenas/admin-lambda-permisos.json` | dry-run |
+| 2 | Log group `/aws/lambda/ork3d-resenas-admin` (30 días) | `aws logs create-log-group` y `put-retention-policy` | dry-run |
+| 3 | Lambda `ork3d-resenas-admin` (python3.12, 256 MB, 10 s) | `aws lambda create-function` con el zip de `admin_app.py` y `nucleo/` | dry-run |
+| 4 | Function URL con `AWS_IAM` | `aws lambda create-function-url-config --auth-type AWS_IAM` | PLAN |
+| 5 | OAC y permiso para CloudFront | `aws cloudfront create-origin-access-control` y `aws lambda add-permission` | PLAN |
+| 6 | Behavior `/admin/api/*` en la distribución | `get-distribution-config` (guardar copia y ETag), luego `update-distribution` con `infra/resenas/admin-cloudfront-behavior.json` | PLAN |
+| 7 | Lifecycle de `admin/` (2 días) | `put-bucket-lifecycle-configuration` con `infra/resenas/bucket-lifecycle.json`. **Reemplaza toda la configuración**: el archivo incluye las reglas de V1 | PLAN |
+| 8 | Función `ork3d-redirect-www` | `update-function` y `publish-function` con `infra/redirect-www.js` (reglas `/admin/resenas` y `/admin/entrar`) | PLAN |
+| 9 | Lambda pública: política y código | `put-role-policy` con `infra/resenas/lambda-permisos.json` (agrega SES y `notificaciones/*`) y `update-function-code` con `app.py` y `nucleo/` | PLAN |
+| 10 | Frontend admin | `deploy.yml` (agrega `admin-web/**`) | PLAN |
+| 11 | Activar el aviso | `update-function-configuration` con `RESENAS_NOTIFY_ENABLED=true`, solo después de la identidad SES verificada | PLAN |
+
+Antes de cada paso PLAN: copia de la configuración actual, en un archivo fuera del repo.
+
+### 18.4 Verificación después de cada paso
+
+- Paso 3: `get-function-configuration`: Runtime python3.12, Handler `admin_app.handler`, Memory 256, Timeout 10,
+  y solo las variables sin secretos (`RESENAS_BUCKET`, `RESENAS_SITE_BUCKET`, `RESENAS_DISTRIBUTION_ID`,
+  `RESENAS_ADMIN_EMAIL`, `RESENAS_FROM_EMAIL`, `RESENAS_ADMIN_BASE_URL`, `ALLOWED_ORIGIN`).
+- Paso 6: la behavior `/admin/api/*` apunta al origen admin y no cachea. El resto de las behaviors no cambió.
+- Paso 7: `get-bucket-lifecycle-configuration` muestra las tres reglas (pendientes, admin y versiones).
+- Paso 8: `GET /admin/entrar` sirve `admin-web/entrar.html`. `GET /admin/api/sesion` no se reescribe.
+
+### 18.5 Smoke de producción (plan)
+
+Ejecutar solo después de la autorización de 18.3. Todo dato de prueba se identifica con `order_ref` que empieza con `SMOKE-V2`.
+
+1. Sin sesión: `GET /admin/resenas` responde 200 con `noindex, nofollow`. `GET /admin/api/sesion` responde 401.
+   `POST /admin/api/sesion/solicitar` sin `Origin` responde 403 y no envía correo.
+2. Acceso: `POST /admin/api/sesion/solicitar` con las cabeceras CSRF. Llega **un** correo al buzón de moderación,
+   con el enlace `…/admin/entrar#c=…`. Abrir el enlace sin confirmar: no consume el código. Confirmar: 200 y
+   cookie `ork3d_admin` con `HttpOnly; Secure; SameSite=Lax; Path=/admin`. Reusar el enlace: 401.
+3. Invitación: crear una con `order_ref` `SMOKE-V2-…`. El enlace `…/opinar/<token>` abre el formulario y
+   `GET /tokens/<token>` responde `ok: true`.
+4. Reseña real de prueba: enviarla. Llega el aviso (`Nueva reseña ORK3D · ★…`) con el enlace al panel. La
+   reseña aparece en la bandeja como pending, con `aviso: enviado`.
+5. Moderación: aprobar, ver el export (`resenas/publicas.json`) con el item y sin campos privados. Ocultar y
+   restaurar. Comprobar que la CLI `admin/resenas.sh pendientes` y `ver` siguen funcionando.
+6. Concurrencia: dos `put-object --if-match` sobre la misma reseña (requisito 2 de 18.1).
+7. Logs: buscar en CloudWatch el token de la invitación, un código de acceso y un correo: no deben aparecer.
+8. Limpieza: borrar las reseñas y tokens `SMOKE-V2` con el procedimiento de la sección 15.5. Revocar la sesión
+   con `POST /admin/api/sesion/cerrar`.
+
+### 18.6 Rollback (por paso, en orden inverso)
+
+| Paso revertido | Cómo volver atrás | Efecto sobre los datos |
+| --- | --- | --- |
+| 11. Aviso | `update-function-configuration` con `RESENAS_NOTIFY_ENABLED=false` | Ninguno. Las reseñas siguen guardadas |
+| 10. Frontend | Redeploy del commit anterior de `admin-web/` (o borrar los objetos `admin-web/*` del bucket del sitio) | Ninguno |
+| 9. Lambda pública | `update-function-code` con el zip anterior (sin `nucleo/`) y `put-role-policy` con la política de V1 | Ninguno |
+| 8. Redirección | `publish-function` con la versión de la copia guardada en 18.3 | Ninguno |
+| 7. Lifecycle | `put-bucket-lifecycle-configuration` con la copia guardada (la de V1) | Las sesiones y locks de `admin/` ya no vencen en 2 días |
+| 6. Behavior | `update-distribution` con la copia guardada y su ETag | Ninguno |
+| 5. OAC | `delete-origin-access-control` tras quitar la behavior. `remove-permission` en la Lambda admin | Ninguno |
+| 4. Function URL | `delete-function-url-config` | Ninguno |
+| 1 a 3. Rol, log group, Lambda | Borrar la Lambda admin y su rol (los datos siguen en el bucket) | Ninguno. Las sesiones abiertas dejan de servir |
+
+Ningún rollback borra reseñas, tokens ni fotos. El panel no tiene estado propio fuera del bucket privado.
+
+### 18.7 Costo
+
+- Costo fijo: 0 USD. No hay recursos con cargo fijo: no hay servidores, bases de datos ni NAT.
+- Costo variable: invocaciones y tiempo de la Lambda (capa gratuita de Lambda), solicitudes de S3, solicitudes de
+  CloudFront, ingestión y retención de 30 días en CloudWatch Logs, y correos de SES (uno por reseña nueva y uno
+  por cada acceso al panel). La tarifa vigente de SES debe confirmarse en la página de precios de AWS antes del deploy.
+- Límites que frenan el gasto: 3 accesos al panel cada 15 minutos (global) y 8 KB por cuerpo.
