@@ -61,15 +61,16 @@ def validar_javascript():
 
 def validar_shell():
     archivos = ['deploy.sh', 'verify.sh', 'infra/setup.sh', 'infra/teardown.sh', 'infra/resenas-setup.sh',
-                'admin/resenas.sh', 'admin/tests/run_tests.sh', 'admin/tests/fixtures.sh']
+                'infra/admin-setup.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh', 'admin/tests/fixtures.sh']
     for rel in archivos:
         r = correr(['bash', '-n', rel])
         comprobar(f'Shell: sintaxis de {rel}', r.returncode == 0, r.stderr.strip())
 
 
 def validar_python():
-    archivos = glob.glob(os.path.join(ROOT, 'api/resenas/*.py')) + glob.glob(os.path.join(ROOT, 'dev/*.py')) + \
-        glob.glob(os.path.join(ROOT, 'admin/tests/*.py')) + glob.glob(os.path.join(ROOT, 'infra/tests/*.py'))
+    archivos = glob.glob(os.path.join(ROOT, 'api/resenas/*.py')) + glob.glob(os.path.join(ROOT, 'api/resenas/nucleo/*.py')) + \
+        glob.glob(os.path.join(ROOT, 'dev/*.py')) + glob.glob(os.path.join(ROOT, 'admin/tests/*.py')) + \
+        glob.glob(os.path.join(ROOT, 'infra/tests/*.py'))
     for ruta in archivos:
         r = correr([sys.executable, '-m', 'py_compile', ruta])
         comprobar(f'Python: compila {os.path.relpath(ruta, ROOT)}', r.returncode == 0, r.stderr.strip())
@@ -123,7 +124,7 @@ class Balance(HTMLParser):
 
 def validar_html():
     paginas = ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'error.html',
-               'opinar.html', 'opiniones.html']
+               'opinar.html', 'opiniones.html', 'admin-web/resenas.html', 'admin-web/entrar.html']
     for rel in paginas:
         parser = Balance()
         parser.feed(leer(rel))
@@ -179,7 +180,7 @@ def validar_iam():
         with open(os.path.join(ROOT, 'infra/resenas', nombre), encoding='utf-8') as f:
             return json.load(f)['Statement']
 
-    for nombre in ['lambda-permisos.json', 'admin-permisos.json']:
+    for nombre in ['lambda-permisos.json', 'admin-permisos.json', 'admin-lambda-permisos.json']:
         for st in sentencias(nombre):
             acciones = st['Action'] if isinstance(st['Action'], list) else [st['Action']]
             comprobar(f'IAM {nombre}: sin s3:* ni recursos "*"',
@@ -221,6 +222,61 @@ def validar_despliegue():
     comprobar('Seguridad: sin access keys AKIA en el repo', llaves.returncode == 1, llaves.stdout[:200])
 
 
+# ── Panel admin V2: estático, CloudFront, ciclo de vida, deploy e infraestructura ──
+def validar_admin_v2():
+    for rel in ['admin-web/resenas.html', 'admin-web/entrar.html']:
+        html = leer(rel)
+        comprobar(f'Admin: {rel} noindex, nofollow',
+                  re.search(r'<meta name="robots" content="noindex, nofollow"\s*/?>', html) is not None)
+        comprobar(f'Admin: {rel} referrer no-referrer',
+                  re.search(r'<meta name="referrer" content="no-referrer"\s*/?>', html) is not None)
+        csp = re.search(r'http-equiv="Content-Security-Policy" content="([^"]*)"', html)
+        comprobar(f'Admin: {rel} CSP por meta', csp is not None)
+        politica = csp.group(1) if csp else ''
+        comprobar(f'Admin: {rel} CSP sin unsafe-inline ni unsafe-eval',
+                  'unsafe-' not in politica, politica[:160])
+        comprobar(f'Admin: {rel} CSP con script-src self', "script-src 'self'" in politica)
+        inline = re.findall(r'<script(?![^>]*\bsrc=)[^>]*>', html)
+        comprobar(f'Admin: {rel} sin scripts inline', not inline, str(inline)[:120])
+        comprobar(f'Admin: {rel} sin <style> ni atributos style=',
+                  '<style' not in html and ' style="' not in html)
+
+    # Nada del panel en el sitio público: ni sitemap ni enlaces desde las páginas públicas.
+    comprobar('Admin: el sitemap no incluye /admin', '/admin' not in leer('sitemap.xml'))
+    for rel in ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'error.html',
+                'opinar.html', 'opiniones.html']:
+        comprobar(f'Admin: {rel} no enlaza el panel', '/admin' not in leer(rel))
+
+    # Reglas de CloudFront: /admin/api/* pasa sin reescribir; las páginas se reescriben antes de la regla extensionless.
+    redir = leer('infra/redirect-www.js')
+    comprobar("Admin CloudFront: /admin/api/* no se reescribe", "'/admin/api/'" in redir)
+    comprobar('Admin CloudFront: /admin/resenas y /admin/entrar van a sus páginas',
+              '/admin-web/resenas.html' in redir and '/admin-web/entrar.html' in redir)
+    comprobar('Admin CloudFront: reglas admin antes de la extensionless',
+              redir.index('/admin-web/resenas.html') < redir.index('Extensionless') and
+              redir.index('/admin-web/entrar.html') < redir.index('Extensionless'))
+
+    # Ciclo de vida: las sesiones, logins y locks de admin/ vencen a los 2 días.
+    with open(os.path.join(ROOT, 'infra/resenas/bucket-lifecycle.json'), encoding='utf-8') as f:
+        reglas = json.load(f)['Rules']
+    admin = [r for r in reglas if (r.get('Filter') or {}).get('Prefix') == 'admin/']
+    comprobar('Admin: lifecycle de admin/ activo y de 2 días',
+              len(admin) == 1 and admin[0].get('Status') == 'Enabled' and admin[0]['Expiration']['Days'] == 2)
+
+    # Deploy: un cambio en admin-web/ dispara la publicación.
+    comprobar('Admin: deploy.yml incluye admin-web/** en sus rutas', "'admin-web/**'" in leer('.github/workflows/deploy.yml'))
+
+    # Infraestructura del panel: DRY_RUN por defecto y empaquetado del núcleo.
+    setup_admin = leer('infra/admin-setup.sh')
+    comprobar('Admin: admin-setup.sh arranca en DRY_RUN=1', 'DRY_RUN="${DRY_RUN:-1}"' in setup_admin)
+    comprobar('Admin: admin-setup.sh no tiene comandos de borrado',
+              re.search(r'\bdelete-|--recursive|\bs3 rm\b|delete-function', setup_admin) is None)
+    comprobar('Admin: admin-setup.sh empaqueta admin_app.py con el núcleo',
+              'admin_app.py nucleo' in setup_admin)
+    comprobar('Admin: resenas-setup.sh detiene el deploy sin el núcleo',
+              'if [[ ! -d api/resenas/nucleo ]]; then' in leer('infra/resenas-setup.sh'))
+
+
 def main():
     validar_javascript()
     validar_shell()
@@ -230,6 +286,7 @@ def main():
     validar_politicas()
     validar_iam()
     validar_despliegue()
+    validar_admin_v2()
     print(f'\nValidaciones: {aprobadas} PASS, {len(fallos)} FAIL')
     sys.exit(1 if fallos else 0)
 
