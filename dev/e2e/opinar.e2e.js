@@ -339,6 +339,60 @@ async function main() {
     });
 
     // ── Ejecución ────────────────────────────────────────────────────────
+    // ── Seguridad: metadatos de la foto y meta tags de /opinar ─────────
+    caso('foto: el EXIF del original no llega al almacenamiento y el JPEG guardado pasa la validación', async (browser) => {
+      const sesion = await abrir(browser, tokens.ok7);
+      try {
+        const p = sesion.page;
+        await p.locator('#formulario').waitFor({ state: 'visible' });
+        // Ruido: la imagen pesa lo suficiente para pasar el mínimo de 15 KB.
+        const base64 = await p.evaluate(() => {
+          const c = document.createElement('canvas');
+          c.width = 1200;
+          c.height = 900;
+          const x = c.getContext('2d');
+          const im = x.createImageData(1200, 900);
+          for (let i = 0; i < im.data.length; i += 4) {
+            im.data[i] = Math.random() * 255;
+            im.data[i + 1] = Math.random() * 255;
+            im.data[i + 2] = Math.random() * 255;
+            im.data[i + 3] = 255;
+          }
+          x.putImageData(im, 0, 0);
+          return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+        });
+        const original = Buffer.from(base64, 'base64');
+        // APP1 Exif con un marcador reconocible, justo después del SOI (FFD8).
+        const carga = Buffer.from('Exif\u0000\u0000ORK3D-EXIF-CANARY-GPS', 'binary');
+        const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, 0, carga.length + 2]), carga]);
+        const conExif = Buffer.concat([original.subarray(0, 2), app1, original.subarray(2)]);
+        esperar(conExif.includes(Buffer.from('ORK3D-EXIF-CANARY')), 'el original debe llevar el canario');
+        await p.setInputFiles('#foto', { name: 'con-exif.jpg', mimeType: 'image/jpeg', buffer: conExif });
+        await p.locator('#foto-estado').filter({ hasText: 'Foto lista.' }).waitFor({ timeout: 15000 });
+        await llenarMinimo(p, { estrellas: 5, nombre: 'Elena Torres' });
+        await p.fill('#comentario', 'Foto con metadatos en el original. frase-exif-7');
+        await p.click('#enviar');
+        await p.locator('#gracias').waitFor({ state: 'visible', timeout: 8000 });
+        const r = await resenaCon('frase-exif-7');
+        esperar(r && r.photo_key, 'la reseña debe tener foto');
+        esperar(r.foto_jpeg_limpio === true, 'la foto guardada debe pasar la validación de JPEG limpio');
+        esperar(r.foto_tiene_exif === false, 'el EXIF del original no debe llegar al almacenamiento');
+        sinErroresNiExternos(sesion);
+      } finally { await cerrar(sesion); }
+    });
+
+    caso('seguridad: /opinar lleva noindex y no-referrer, y no carga nada de terceros', async (browser) => {
+      const sesion = await abrir(browser, tokens.ok1);
+      try {
+        const robots = await sesion.page.locator('meta[name="robots"]').getAttribute('content');
+        const referrer = await sesion.page.locator('meta[name="referrer"]').getAttribute('content');
+        esperar(/noindex/.test(robots || ''), `robots: ${robots}`);
+        esperar(referrer === 'no-referrer', `referrer: ${referrer}`);
+        await sesion.page.locator('#formulario').waitFor({ state: 'visible' });
+        sinErroresNiExternos(sesion);
+      } finally { await cerrar(sesion); }
+    });
+
     // ── Listado público /opiniones (datos de prueba vía route; sin tocar el servidor) ──
     const publicasVacio = async (browser) => {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'es-AR' });

@@ -231,7 +231,7 @@ afirma "ocultar: sale con 0" "RC=${RC}: ${ERR}" test "$RC" -eq 0
 afirma "ocultar: status hidden" "status=$(estado "$RP_FOTO")" test "$(estado "$RP_FOTO")" = hidden
 afirma "ocultar: la reseña sale del export" "sigue en el export" no_contiene "$RP_FOTO" "$(cat "$EXPORT_FILE")"
 afirma "ocultar: la foto pública se borra del sitio" "la foto pública sigue" test ! -f "$(ruta_sitio "resenas/fotos/${RP_FOTO}.jpg")"
-afirma "ocultar: la foto privada se conserva" "se borró la privada" existe_priv "pendientes/${TH1}/foto-test-1.jpg"
+afirma "ocultar: la foto privada se conserva" "se borró la privada" existe_priv "$FOTO_1"
 
 # ── 8. restaurar ────────────────────────────────────────────────────────────
 seccion "8. restaurar"
@@ -251,6 +251,8 @@ cli rechazar "$RP_TEXTO"
 afirma "rechazar pending: sale con 0" "RC=${RC}: ${ERR}" test "$RC" -eq 0
 afirma "rechazar pending: status rejected" "status=$(estado "$RP_TEXTO")" test "$(estado "$RP_TEXTO")" = rejected
 afirma "rechazar pending: no regenera el export" "se subió el export" test "$(puts_export)" -eq "$EXPORTS_ANTES"
+afirma "export: el modo anónimo muestra 'Cliente de ORK3D'" "display_name=$(item_export "$RA_ANON" display_name)" \
+  test "$(item_export "$RA_ANON" display_name)" = "Cliente de ORK3D"
 cli rechazar "$RA_ANON"
 afirma "rechazar approved: sale con 0" "RC=${RC}: ${ERR}" test "$RC" -eq 0
 afirma "rechazar approved: sale del export" "sigue en el export" no_contiene "$RA_ANON" "$(cat "$EXPORT_FILE")"
@@ -270,7 +272,7 @@ afirma "verificar: el export refleja verified=true" "verified en export distinto
 seccion "11. borrar --foto"
 cli borrar "$RA_FOTO" --foto --yes
 afirma "borrar --foto --yes: sale con 0" "RC=${RC}: ${ERR}" test "$RC" -eq 0
-afirma "borrar --foto: quita la foto privada" "la foto privada sigue" no_existe_priv "pendientes/${TH6}/foto-test-2.jpg"
+afirma "borrar --foto: quita la foto privada" "la foto privada sigue" no_existe_priv "$FOTO_2"
 afirma "borrar --foto: quita la foto pública" "la foto pública sigue" test ! -f "$(ruta_sitio "resenas/fotos/${RA_FOTO}.jpg")"
 afirma "borrar --foto: photo_key y photo_public_key quedan en null" "campos no nulos" \
   test "$(campo_priv "resenas/${RA_FOTO}.json" photo_key)$(campo_priv "resenas/${RA_FOTO}.json" photo_public_key)" = nullnull
@@ -296,7 +298,7 @@ afirma "mantenimiento --dry-run: no borra nada" "se borró en dry-run" existe_pr
 cli mantenimiento --yes
 afirma "mantenimiento --yes: sale con 0" "RC=${RC}: ${ERR}" test "$RC" -eq 0
 afirma "mantenimiento --yes: borra la rechazada vieja" "sigue existiendo" no_existe_priv "resenas/${RJ_VIEJA}.json"
-afirma "mantenimiento --yes: borra su foto privada" "la foto sigue" no_existe_priv "pendientes/${TH9}/foto-test-3.jpg"
+afirma "mantenimiento --yes: borra su foto privada" "la foto sigue" no_existe_priv "$FOTO_3"
 afirma "mantenimiento --yes: conserva la rechazada reciente" "se borró la reciente" existe_priv "resenas/${RR_NUEVA}.json"
 
 # ── 14. exportar ────────────────────────────────────────────────────────────
@@ -327,6 +329,11 @@ afirma "ver: descarga la foto privada a ADMIN_OUT_DIR" "no se descargó la foto"
 afirma "ver: la foto descargada tiene cabecera JPEG" "cabecera inválida" jpeg_ok "${ADMIN_OUT_DIR}/${RP_FOTO}-privada.jpg"
 afirma "ver: la foto descargada tiene permisos 600" "permisos=$(permisos "${ADMIN_OUT_DIR}/${RP_FOTO}-privada.jpg")" \
   test "$(permisos "${ADMIN_OUT_DIR}/${RP_FOTO}-privada.jpg")" = 600
+
+cli ver "$RP_WEBP"
+afirma "ver: rechaza una clave WebP (el Lambda solo acepta JPEG)" "RC=${RC}" test "$RC" -eq 1
+cli ver "$RP_CLAVE_MALA"
+afirma "ver: rechaza una clave fuera del formato del Lambda" "RC=${RC}" test "$RC" -eq 1
 
 TODA_LA_SALIDA=""
 for comando in "pendientes" "token listar" "exportar" "mantenimiento --dry-run" "ver ${RA_NEW}"; do

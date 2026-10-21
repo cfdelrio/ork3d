@@ -5,7 +5,9 @@ Solo para tests: no toca AWS. Raíz de datos: variable de entorno SHIM_ROOT.
 
 Diseño:
   - Bucket = subdirectorio de SHIM_ROOT.
-  - Objeto actual = archivo dentro del bucket (SHIM_ROOT/<bucket>/<clave>).
+  - Objeto actual = archivo dentro del bucket (SHIM_ROOT/<bucket>/<clave>). Si otro proceso
+    escribe o borra archivos directamente (p. ej. los tests de contrato con la Lambda), el shim
+    lo registra como versión nueva o borrado al primer uso del bucket (ver reconciliar()).
   - Cada put crea una versión: contenido en SHIM_ROOT/.versions/<bucket>/<VersionId>
     e índice JSON por objeto en SHIM_ROOT/.meta/<bucket>/<sha256(clave)>.json
     (lista de versiones; la última es la vigente; un marcador de borrado tiene Deleted=true).
@@ -189,6 +191,7 @@ def put_object(r, bucket, clave, cuerpo, tipo, cache, if_none_match):
         "VersionId": vid,
         "Deleted": False,
         "Size": len(datos),
+        "MD5": hashlib.md5(datos).hexdigest(),
         "ContentType": tipo,
         "CacheControl": cache,
         "LastModified": ahora_iso(),
@@ -359,11 +362,63 @@ def cloudfront(r, op, flags):
     return {"Invalidation": {"Id": "TESTINV"}}
 
 
+def reconciliar(r, bucket):
+    """Pone el historial al día con los archivos del bucket.
+
+    Un archivo cuyo contenido no coincide con la última versión se registra como versión nueva
+    (escritura externa). Un objeto con versión vigente que ya no tiene archivo se registra como
+    borrado (borrado externo). Así el shim ve lo mismo que ve el código que escribe directo al disco.
+    """
+    base = os.path.join(r, bucket)
+    if not os.path.isdir(base):
+        return
+    vistos = set()
+    for dirpath, _dirs, nombres in os.walk(base):
+        for nombre in nombres:
+            ruta = os.path.join(dirpath, nombre)
+            clave = os.path.relpath(ruta, base).replace(os.sep, "/")
+            vistos.add(clave)
+            with open(ruta, "rb") as f:
+                datos = f.read()
+            md5 = hashlib.md5(datos).hexdigest()
+            versiones = cargar_versiones(r, bucket, clave)
+            vig = vigente(versiones)
+            if vig is not None and not vig["Deleted"] and vig.get("MD5") == md5:
+                continue
+            vid = uuid.uuid4().hex
+            os.makedirs(dir_versiones(r, bucket), exist_ok=True)
+            with open(os.path.join(dir_versiones(r, bucket), vid), "wb") as f:
+                f.write(datos)
+            versiones.append({"VersionId": vid, "Deleted": False, "Size": len(datos),
+                              "MD5": md5, "LastModified": ahora_iso()})
+            guardar_versiones(r, bucket, clave, versiones)
+    for clave, versiones in todas_las_claves(r, bucket):
+        vig = vigente(versiones)
+        if vig is not None and not vig["Deleted"] and clave not in vistos:
+            versiones.append({"VersionId": uuid.uuid4().hex, "Deleted": True, "Size": 0,
+                              "LastModified": ahora_iso()})
+            guardar_versiones(r, bucket, clave, versiones)
+
+
+def buckets_de(flags, pos):
+    """Buckets que toca una llamada: --bucket y los argumentos s3://BUCKET/..."""
+    nombres = set()
+    if "bucket" in flags:
+        nombres.add(flags["bucket"])
+    for p in pos:
+        if p.startswith("s3://"):
+            nombres.add(p[5:].split("/", 1)[0])
+    return sorted(nombres)
+
+
 def main(argv):
     servicio, op, flags, pos = parsear(argv)
     r = raiz()
     with open(os.path.join(r, "_aws_calls.log"), "a", encoding="utf-8") as f:
         f.write(" ".join(argv) + "\n")
+    if servicio in ("s3api", "s3"):
+        for bucket in buckets_de(flags, pos):
+            reconciliar(r, bucket)
     if servicio == "s3api":
         resultado = s3api(r, op, flags, pos)
     elif servicio == "s3":

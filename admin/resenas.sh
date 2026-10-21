@@ -85,7 +85,7 @@ hash_token() {
 
 # Validaciones de identificadores (evitan inyección de rutas en las claves S3).
 validar_id() {
-  if [[ ! "$1" =~ ^[a-f0-9]{24}$ ]]; then
+  if [[ ! "$1" =~ ^[a-f0-9]{32}$ ]]; then
     err "ID de reseña inválido: '$1'."
     exit 1
   fi
@@ -275,7 +275,7 @@ cmd_token_listar() {
       aviso "no pude leer el registro ${hash:0:12}..."
       continue
     fi
-    fila="$(jq -r '[(.product_label // "-"), (.created_at // "-"), (.expires_at // "-"),
+    fila="$(jq -r '[(.product_slug // "-"), (.created_at // "-"), (.expires_at // "-"),
       (if .revoked then "sí" else "no" end)] | @tsv' "$ruta")"
     IFS=$'\t' read -r etiqueta creado vence revocado <<< "$fila"
     # El claim lo crea la Lambda al usar el link: la CLI solo lo consulta.
@@ -331,7 +331,7 @@ confirmar() {  # confirmar MENSAJE
 
 # Las claves de foto vienen del registro: se validan antes de usarlas en S3.
 validar_clave_foto() {  # validar_clave_foto CLAVE
-  if [[ ! "$1" =~ ^pendientes/[a-f0-9]{64}/[A-Za-z0-9._-]+$ ]]; then
+  if [[ ! "$1" =~ ^pendientes/[a-f0-9]{64}/[a-f0-9]{32}\.jpg$ ]]; then
     err "clave de foto inválida en el registro de la reseña."
     exit 1
   fi
@@ -367,18 +367,19 @@ publicar_foto() {  # publicar_foto ID CLAVE_PRIVADA
   local id="$1" origen="" destino="" cabecera=""
   origen="$(descargar_objeto "$RESENAS_BUCKET" "$2")" || { err "no pude descargar la foto privada (error de AWS)."; return 3; }
   destino="${TMP_DIR}/${id}.jpg"
+  # La foto ya pasó la validación al subirla (JPEG sin EXIF, XMP ni comentarios; ver app.py).
+  # Si ImageMagick está instalado, la limpia otra vez como defensa en profundidad.
   if command -v magick >/dev/null 2>&1; then
     if ! magick "$origen" -strip "$destino" 2>/dev/null; then
       err "ImageMagick no pudo procesar la foto de la reseña ${id}."
       return 1
     fi
   else
-    aviso "ImageMagick (magick) no está instalado: la foto de la reseña ${id} se publica SIN quitar metadatos (EXIF)."
     cp "$origen" "$destino"
   fi
   cabecera="$(head -c 3 "$destino" | od -An -tx1 | tr -d ' \n')"
   if [[ "$cabecera" != "ffd8ff" ]]; then
-    err "la foto de la reseña ${id} no es un JPEG válido."
+    err "la foto de la reseña ${id} no es JPEG; no se publica."
     return 1
   fi
   if ! subir_objeto "$SITE_BUCKET" "resenas/fotos/${id}.jpg" "$destino" "image/jpeg" \
@@ -399,7 +400,7 @@ exportar_publicas() {
     return 3
   fi
   while IFS= read -r clave; do
-    [[ "$clave" =~ ^resenas/[a-f0-9]{24}\.json$ ]] || continue
+    [[ "$clave" =~ ^resenas/[a-f0-9]{32}\.json$ ]] || continue
     if ! ruta="$(descargar_objeto "$RESENAS_BUCKET" "$clave")"; then
       err "no pude leer una reseña (error de AWS)."
       return 3
@@ -421,7 +422,7 @@ exportar_publicas() {
             rating: .rating,
             comment: .comment,
             aspects: (.aspects // []),
-            display_name: (if .display_mode == "anonimo" then "Cliente anónimo" else (.display_name // "Cliente") end),
+            display_name: (.display_name // "Cliente de ORK3D"),
             category: .category,
             product_label: .product_label,
             verified: (.verified // false),
@@ -469,7 +470,7 @@ cmd_pendientes() {
   fi
   lista="$(mktemp "${TMP_DIR}/pendientes.XXXXXX")"
   while IFS= read -r clave; do
-    [[ "$clave" =~ ^resenas/[a-f0-9]{24}\.json$ ]] || continue
+    [[ "$clave" =~ ^resenas/[a-f0-9]{32}\.json$ ]] || continue
     if ! ruta="$(descargar_objeto "$RESENAS_BUCKET" "$clave")"; then
       aviso "no pude leer una reseña (error de AWS)."
       continue
@@ -700,7 +701,7 @@ cmd_mantenimiento() {
   fi
   lista="$(mktemp "${TMP_DIR}/mant.XXXXXX")"
   while IFS= read -r clave; do
-    [[ "$clave" =~ ^resenas/[a-f0-9]{24}\.json$ ]] || continue
+    [[ "$clave" =~ ^resenas/[a-f0-9]{32}\.json$ ]] || continue
     if ! ruta="$(descargar_objeto "$RESENAS_BUCKET" "$clave")"; then
       aviso "no pude leer una reseña (error de AWS)."
       continue

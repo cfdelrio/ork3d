@@ -1,12 +1,13 @@
-"""Contrato entre el CLI de moderación (admin/resenas.sh) y la Lambda (app.py).
+"""Contrato entre el CLI de moderación (admin/resenas.sh) y la API (app.py).
 
-Corre el CLI real contra el shim de AWS (admin/tests/aws_shim.py, que guarda archivos
-en un directorio temporal) y usa la lógica real de app.py sobre esos mismos archivos.
-Así se prueba que lo que escribe uno lo lee el otro: formato de tokens, claves de
-reseñas y fotos, claims y export público.
+Corre el CLI real contra el shim de AWS (admin/tests/aws_shim.py, que guarda los
+objetos como archivos en un directorio temporal) y la API real por su punto de
+entrada, app.handler, sobre esos mismos archivos. Nada del contrato se simula:
+si CLI y API no coinciden en formato de IDs, claves o campos, el test falla.
 
 Requiere bash, jq y openssl, igual que el CLI.
 """
+import datetime as dt
 import io
 import json
 import os
@@ -18,14 +19,16 @@ import tempfile
 import unittest
 
 import app
-from fakes import FakeClientError
+from fakes import FakeClientError, jpeg
 
 RAIZ_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CLI = os.path.join(RAIZ_REPO, 'admin', 'resenas.sh')
 SHIM = os.path.join(RAIZ_REPO, 'admin', 'tests', 'aws_shim.py')
 PRIVADO = 'bucket-privado-test'
 SITIO = 'bucket-sitio-test'
-JPEG = b'\xff\xd8\xff\xe0' + b'\x00' * 20_000
+PEDIDO = 'PEDIDO-SECRETO-777'
+JPEG = jpeg()
+ID_RE = re.compile(r'^[a-f0-9]{32}$')
 
 
 class ArchivosS3:
@@ -92,14 +95,18 @@ def payload(token, **cambios):
     return p
 
 
-class ContratoCliEnLambda(unittest.TestCase):
+class Base(unittest.TestCase):
     def setUp(self):
         self.raiz = tempfile.mkdtemp(prefix='resenas-contrato-')
         self.addCleanup(shutil.rmtree, self.raiz, ignore_errors=True)
         self.s3 = ArchivosS3(self.raiz)
         self.svc = app.Service(self.s3, PRIVADO, 'https://ork3d.com',
                                google_review_url='https://g.page/r/ejemplo/review')
+        previo = app._SVC
+        app._SVC = self.svc
+        self.addCleanup(setattr, app, '_SVC', previo)
 
+    # ── CLI ───────────────────────────────────────────────────────────────
     def cli(self, *args):
         entorno = {
             **os.environ,
@@ -116,86 +123,188 @@ class ContratoCliEnLambda(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f'resenas.sh {" ".join(args)} falló: {r.stderr}')
         return r.stdout
 
-    def ruta(self, bucket, key):
-        return os.path.join(self.raiz, bucket, *key.split('/'))
-
-    def publicas(self):
-        with open(self.ruta(SITIO, 'resenas/publicas.json'), encoding='utf-8') as f:
-            return json.load(f)
-
     def crear_token(self):
-        salida = self.cli_ok('token', 'crear', '--pedido', 'PED-1', '--producto', 'trofeo-acrilico',
+        salida = self.cli_ok('token', 'crear', '--pedido', PEDIDO, '--producto', 'trofeo-acrilico',
                              '--categoria', 'trofeos', '--producto-label', 'Trofeo acrílico')
         m = re.search(r'/opinar/([A-Za-z0-9_-]{32})', salida)
         self.assertIsNotNone(m, f'el CLI no imprimió un enlace: {salida}')
         return m.group(1)
 
-    def test_token_creado_por_el_cli_lo_valida_la_lambda(self):
-        token = self.crear_token()
-        status, body = self.svc.get_token(token)
-        self.assertEqual(status, 200)
-        self.assertTrue(body['ok'], body)
-        self.assertEqual(body['producto'], 'Trofeo acrílico')
-        self.assertEqual(body['categoria'], 'trofeos')
+    # ── Archivos ──────────────────────────────────────────────────────────
+    def ruta(self, bucket, key):
+        return os.path.join(self.raiz, bucket, *key.split('/'))
 
-    def test_flujo_completo_publica_solo_lo_aprobado_y_sin_datos_privados(self):
-        token = self.crear_token()
-        status, body = self.svc.create_review(payload(token))
+    def leer(self, bucket, key):
+        with open(self.ruta(bucket, key), encoding='utf-8') as f:
+            return json.load(f)
+
+    def publicas(self):
+        if not os.path.isfile(self.ruta(SITIO, 'resenas/publicas.json')):
+            return {'count': 0, 'items': []}
+        return self.leer(SITIO, 'resenas/publicas.json')
+
+    # ── API (punto de entrada real) ───────────────────────────────────────
+    def api(self, metodo, ruta, cuerpo=None):
+        evento = {'requestContext': {'http': {'method': metodo}}, 'rawPath': ruta}
+        if cuerpo is not None:
+            evento['body'] = json.dumps(cuerpo, ensure_ascii=False)
+        r = app.handler(evento)
+        return r['statusCode'], (json.loads(r['body']) if r['body'] else None)
+
+    def enviar_resena(self, token, con_foto=False, **cambios):
+        clave = None
+        if con_foto:
+            status, firma = self.api('POST', '/presign', {'token': token, 'ext': 'jpg'})
+            self.assertEqual(status, 200, firma)
+            clave = firma['key']
+            self.s3.put_object(Bucket=PRIVADO, Key=clave, Body=JPEG)  # lo que haría el navegador
+        status, body = self.api('POST', '/resenas', payload(token, photo_key=clave, **cambios))
         self.assertEqual(status, 200, body)
-        rid = body['id']
-        self.assertTrue(os.path.isfile(self.ruta(PRIVADO, f'resenas/{rid}.json')))
+        self.assertRegex(body['id'], ID_RE, 'la Lambda debe generar IDs de 32 caracteres hex')
+        return body['id'], clave
 
-        self.assertIn(rid, self.cli_ok('pendientes'))
-        self.cli_ok('aprobar', rid)
+    def resena_pendiente(self, **cambios):
+        token = self.crear_token()
+        rid, _ = self.enviar_resena(token, **cambios)
+        return rid
 
-        publicas = self.publicas()
-        self.assertEqual(publicas['count'], 1)
-        item = publicas['items'][0]
+    def assertSinDatosPrivados(self, publica, token, clave_foto=None):
+        texto = json.dumps(publica, ensure_ascii=False)
+        prohibidos = ['ana@example.com', 'SECRETO-PRIVADO', PEDIDO, 'Gómez', token,
+                      app.token_hash(token), 'pendientes/', 'order_ref', 'contact', 'private_feedback']
+        if clave_foto:
+            prohibidos.append(clave_foto)
+        for secreto in prohibidos:
+            self.assertNotIn(secreto, texto, f'el export público expone {secreto!r}')
+
+
+class FlujoCompleto(Base):
+    def test_cli_crea_token_lambda_recibe_resena_cli_aprueba_export_publico(self):
+        token = self.crear_token()                                      # CLI genera el enlace
+        status, body = self.api('GET', f'/tokens/{token}')              # Lambda acepta el token
+        self.assertEqual((status, body['ok']), (200, True))
+        self.assertEqual(body['producto'], 'Trofeo acrílico')
+
+        rid, clave = self.enviar_resena(token, con_foto=True)           # el cliente envía con foto
+
+        self.assertIn(rid, self.cli_ok('pendientes'))                   # CLI ve la reseña pendiente
+        self.cli_ok('ver', rid)
+        self.cli_ok('aprobar', rid)                                     # CLI aprueba
+
+        publica = self.publicas()                                       # export público
+        self.assertEqual(publica['count'], 1)
+        item = publica['items'][0]
         self.assertEqual(item['id'], rid)
         self.assertEqual(item['display_name'], 'Ana G.')
-        self.assertEqual(item['product_label'], 'Trofeo acrílico')
-        texto = json.dumps(publicas, ensure_ascii=False)
-        self.assertNotIn('ana@example.com', texto)
-        self.assertNotIn('SECRETO-PRIVADO', texto)
-
-        status, body = self.svc.create_review(payload(token, comment='otra vez'))
-        self.assertEqual((status, body.get('motivo')), (409, 'usado'))
-
-    def test_anonimo_se_publica_con_el_nombre_que_promete_el_formulario(self):
-        token = self.crear_token()
-        status, body = self.svc.create_review(payload(token, display_mode='anonimo', name='',
-                                                      contact_requested=False))
-        self.assertEqual(status, 200, body)
-        self.cli_ok('aprobar', body['id'])
-        self.assertEqual(self.publicas()['items'][0]['display_name'], 'Cliente de ORK3D')
-
-    def test_foto_aprobada_se_copia_al_sitio_y_se_enlaza(self):
-        token = self.crear_token()
-        status, firma = self.svc.presign({'token': token, 'ext': 'jpg'})
-        self.assertEqual(status, 200)
-        self.s3.put_object(Bucket=PRIVADO, Key=firma['key'], Body=JPEG)  # lo que haría el navegador
-        status, body = self.svc.create_review(payload(token, photo_key=firma['key']))
-        self.assertEqual(status, 200, body)
-        rid = body['id']
-        self.cli_ok('aprobar', rid)
-        item = self.publicas()['items'][0]
         self.assertEqual(item['photo_url'], f'/resenas/fotos/{rid}.jpg')
         self.assertTrue(os.path.isfile(self.ruta(SITIO, f'resenas/fotos/{rid}.jpg')))
+        self.assertSinDatosPrivados(publica, token, clave)
 
-    def test_revocar_desde_el_cli_bloquea_el_enlace(self):
+        privada = self.leer(PRIVADO, f'resenas/{rid}.json')             # la copia privada sí conserva todo
+        self.assertEqual(privada['contact'], 'ana@example.com')
+        self.assertEqual(privada['status'], 'approved')
+
+        status, body = self.api('POST', '/resenas', payload(token, comment='otra vez'))
+        self.assertEqual((status, body['motivo']), (409, 'usado'))      # el enlace ya no sirve
+
+
+class OperacionesCli(Base):
+    def test_listar_y_revocar_tokens(self):
         token = self.crear_token()
+        listado = self.cli_ok('token', 'listar')
+        self.assertIn('trofeo-acrilico', listado)
+        self.assertNotIn(token, listado, 'listar no debe imprimir el token')
         self.cli_ok('token', 'revocar', token)
-        self.assertEqual(self.svc.get_token(token)[1]['motivo'], 'revocado')
+        self.assertEqual(self.api('GET', f'/tokens/{token}')[1]['motivo'], 'revocado')
 
-    def test_ocultar_saca_la_resena_del_sitio_sin_borrarla(self):
-        token = self.crear_token()
-        status, body = self.svc.create_review(payload(token))
-        rid = body['id']
+    def test_ver_muestra_la_resena_con_id_de_32(self):
+        rid = self.resena_pendiente()
+        self.assertIn(rid, self.cli_ok('ver', rid))
+
+    def test_rechazar_no_publica_y_queda_registrado(self):
+        rid = self.resena_pendiente()
+        self.cli_ok('rechazar', rid)
+        self.assertEqual(self.leer(PRIVADO, f'resenas/{rid}.json')['status'], 'rejected')
+        self.assertNotIn(rid, json.dumps(self.publicas()))
+
+    def test_ocultar_y_restaurar_con_export_consistente(self):
+        rid = self.resena_pendiente()
         self.cli_ok('aprobar', rid)
         self.assertEqual(self.publicas()['count'], 1)
         self.cli_ok('ocultar', rid)
         self.assertEqual(self.publicas()['count'], 0)
         self.assertTrue(os.path.isfile(self.ruta(PRIVADO, f'resenas/{rid}.json')))
+        self.cli_ok('restaurar', rid)
+        self.assertEqual(self.publicas()['count'], 1)
+
+    def test_verificar_reseña_aprobada(self):
+        rid = self.resena_pendiente()
+        self.cli_ok('aprobar', rid)
+        self.cli_ok('verificar', rid)
+
+    def test_exportar_regenera_el_archivo_publico(self):
+        rid = self.resena_pendiente()
+        self.cli_ok('aprobar', rid)
+        os.remove(self.ruta(SITIO, 'resenas/publicas.json'))
+        self.cli_ok('exportar')
+        self.assertEqual(self.publicas()['items'][0]['id'], rid)
+
+    def test_borrar_solo_foto_conserva_el_texto(self):
+        # Según el CLI: `borrar ID --foto` quita las fotos (privada y pública) y deja la reseña.
+        token = self.crear_token()
+        rid, clave = self.enviar_resena(token, con_foto=True)
+        self.cli_ok('aprobar', rid)
+        self.assertTrue(os.path.isfile(self.ruta(SITIO, f'resenas/fotos/{rid}.jpg')))
+        self.cli_ok('borrar', rid, '--foto', '--yes')
+        self.assertFalse(os.path.isfile(self.ruta(SITIO, f'resenas/fotos/{rid}.jpg')))
+        self.assertFalse(os.path.isfile(self.ruta(PRIVADO, clave)))
+        privada = self.leer(PRIVADO, f'resenas/{rid}.json')
+        self.assertIsNone(privada['photo_key'])
+        self.assertIsNone(privada['photo_public_key'])
+        self.assertIsNone(self.publicas()['items'][0]['photo_url'])
+
+    def test_borrar_completa_quita_texto_y_fotos(self):
+        token = self.crear_token()
+        rid, clave = self.enviar_resena(token, con_foto=True)
+        self.cli_ok('aprobar', rid)
+        self.cli_ok('borrar', rid, '--yes')
+        self.assertFalse(os.path.isfile(self.ruta(PRIVADO, f'resenas/{rid}.json')))
+        self.assertFalse(os.path.isfile(self.ruta(PRIVADO, clave)))
+        self.assertFalse(os.path.isfile(self.ruta(SITIO, f'resenas/fotos/{rid}.jpg')))
+        self.assertEqual(self.publicas()['count'], 0)
+
+    def test_mantenimiento_solo_borra_rechazadas_de_mas_de_90_dias(self):
+        vieja = self.resena_pendiente()
+        self.cli_ok('rechazar', vieja)
+        nueva = self.resena_pendiente()
+        self.cli_ok('rechazar', nueva)
+        oculta = self.resena_pendiente()
+        self.cli_ok('aprobar', oculta)
+        self.cli_ok('ocultar', oculta)
+        hace_120 = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=120)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        for rid in (vieja, oculta):
+            ruta = self.ruta(PRIVADO, f'resenas/{rid}.json')
+            datos = self.leer(PRIVADO, f'resenas/{rid}.json')
+            datos['created_at'] = hace_120
+            with open(ruta, 'w', encoding='utf-8') as f:
+                json.dump(datos, f)
+        self.assertIn(vieja, self.cli_ok('mantenimiento', '--dry-run'))
+        self.cli_ok('mantenimiento', '--yes')
+        self.assertFalse(os.path.isfile(self.ruta(PRIVADO, f'resenas/{vieja}.json')))
+        self.assertTrue(os.path.isfile(self.ruta(PRIVADO, f'resenas/{nueva}.json')))
+        self.assertTrue(os.path.isfile(self.ruta(PRIVADO, f'resenas/{oculta}.json')))
+
+    def test_backup_copia_el_bucket_privado(self):
+        self.crear_token()
+        destino = tempfile.mkdtemp(prefix='resenas-backup-')
+        self.addCleanup(shutil.rmtree, destino, ignore_errors=True)
+        self.cli_ok('backup', destino)
+        copias = [f for _, _, archivos in os.walk(destino) for f in archivos]
+        self.assertTrue(any(f.endswith('.json') for f in copias), copias)
+
+    def test_ids_que_no_son_de_32_se_rechazan(self):
+        r = self.cli('aprobar', 'a' * 24)
+        self.assertNotEqual(r.returncode, 0)
 
 
 if __name__ == '__main__':

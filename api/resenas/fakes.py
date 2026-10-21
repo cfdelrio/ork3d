@@ -117,3 +117,17 @@ class FakeS3:
                 raise NotImplementedError(f'condición no modelada: {cond!r}')
         self.objects[clave] = bytes(cuerpo)
         self.calls.append(('browser_post', clave))
+
+
+def segmento(marcador, cuerpo):
+    """Segmento JPEG: marcador 0xFF xx, longitud big-endian que incluye los 2 bytes de longitud."""
+    return b'\xff' + bytes([marcador]) + (len(cuerpo) + 2).to_bytes(2, 'big') + cuerpo
+
+
+def jpeg(app0=b'JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00', segmentos_extra=b'',
+         entropia=b'x' * 16_000):
+    """JPEG sintético con la estructura de marcadores de un JPEG real (la imagen no se decodifica)."""
+    return (b'\xff\xd8' + segmento(0xE0, app0) + segmentos_extra
+            + segmento(0xDB, b'\x00' * 65) + segmento(0xC0, b'\x08\x00\x10\x00\x10\x03' + b'\x01\x11\x00' * 3)
+            + segmento(0xC4, b'\x00' * 20) + segmento(0xDA, b'\x01\x01\x00\x00\x3f\x00')
+            + entropia + b'\xff\xd9')

@@ -23,13 +23,13 @@ TOKEN_RE = re.compile(r'[A-Za-z0-9_-]{32}')
 PRESIGN_TTL = 600
 PHOTO_MIN_BYTES = 15_000
 PHOTO_MAX_BYTES = 2_000_000
-PHOTO_EXT = {'jpg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
+PHOTO_EXT = {'jpg': 'image/jpeg'}  # solo JPEG: el navegador recodifica a JPEG y el export público es .jpg
 ASPECTS = {'diseno', 'personalizacion', 'calidad', 'fecha', 'atencion', 'resultado'}
 DISPLAY_MODES = {'inicial', 'nombre', 'anonimo'}
 ANON_NAME = 'Cliente de ORK3D'
 LIMITS = {'comment': 600, 'private_feedback': 800, 'name': 40, 'contact': 120}
 NAME_RE = re.compile(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ' .\-]{1,39}")
-PHOTO_KEY_RE = re.compile(r'pendientes/([0-9a-f]{64})/([0-9a-f]{32})\.(jpg|png|webp)')
+PHOTO_KEY_RE = re.compile(r'pendientes/([0-9a-f]{64})/([0-9a-f]{32})\.jpg')
 _CONTROL = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 log = logging.getLogger('resenas')
@@ -170,14 +170,52 @@ def parse_review(p):
     }
 
 
-def sniff_ok(head, ext):
-    """Verifica la firma binaria del archivo (magic bytes) para el formato declarado."""
-    if ext == 'jpg':
-        return head[:3] == b'\xff\xd8\xff'
-    if ext == 'png':
-        return head[:8] == b'\x89PNG\r\n\x1a\n'
-    if ext == 'webp':
-        return head[:4] == b'RIFF' and head[8:12] == b'WEBP'
+# Segmentos JPEG que puede tener una foto nuestra: cabeceras y tablas de imagen, nada más.
+# APP0 solo si es JFIF y APP2 solo si es perfil de color ICC (no lleva datos personales).
+# Cualquier otro APPn (EXIF con GPS, XMP, IPTC) y COM se rechazan.
+SEGMENTOS_JPEG = {0xC0, 0xC1, 0xC2, 0xC4, 0xDA, 0xDB, 0xDD}  # SOF0-2, DHT, SOS, DQT, DRI
+REINICIOS = set(range(0xD0, 0xD8))
+
+
+def jpeg_sin_metadatos(datos):
+    """True si `datos` es un JPEG que solo tiene segmentos de imagen (y JFIF).
+
+    Recorre los marcadores sin decodificar la imagen. La foto pública no puede llevar
+    datos ocultos aunque el cliente se salte la recodificación del navegador.
+    """
+    if datos[:2] != b'\xff\xd8':
+        return False
+    pos, n = 2, len(datos)
+    while pos + 1 < n:
+        if datos[pos] != 0xFF:
+            return False
+        marcador = datos[pos + 1]
+        if marcador == 0xFF:  # relleno
+            pos += 1
+            continue
+        pos += 2
+        if marcador == 0xD9:  # EOI: tiene que ser el último byte; nada puede ir después
+            return pos == n
+        if marcador == 0x01 or marcador in REINICIOS:  # sin longitud
+            continue
+        if pos + 2 > n:
+            return False
+        largo = int.from_bytes(datos[pos:pos + 2], 'big')
+        if largo < 2 or pos + largo > n:
+            return False
+        if marcador == 0xE0:
+            if not datos[pos + 2:pos + largo].startswith(b'JFIF\x00'):
+                return False
+        elif marcador == 0xE2:
+            if not datos[pos + 2:pos + largo].startswith(b'ICC_PROFILE\x00'):
+                return False
+        elif marcador not in SEGMENTOS_JPEG:
+            return False
+        pos += largo
+        if marcador == 0xDA:  # SOS: los datos comprimidos siguen hasta el próximo marcador
+            while pos + 1 < n and not (datos[pos] == 0xFF and datos[pos + 1] != 0x00
+                                       and datos[pos + 1] not in REINICIOS):
+                pos += 1
     return False
 
 
@@ -283,7 +321,6 @@ class Service:
             match = PHOTO_KEY_RE.fullmatch(photo_key)
             if not match or match.group(1) != h:
                 return 400, {'ok': False, 'error': 'validacion', 'campos': {'photo_key': 'Foto inválida.'}}
-            ext = match.group(3)
             try:
                 size = self.s3.head_object(Bucket=self.bucket, Key=photo_key)['ContentLength']
             except Exception as exc:
@@ -292,10 +329,10 @@ class Service:
                 raise
             if not PHOTO_MIN_BYTES <= size <= PHOTO_MAX_BYTES:
                 return 400, {'ok': False, 'error': 'validacion', 'campos': {'photo_key': 'La foto tiene un tamaño no permitido.'}}
-            head = self.s3.get_object(Bucket=self.bucket, Key=photo_key, Range='bytes=0-15')['Body'].read()
-            if not sniff_ok(head, ext):
+            datos = self.s3.get_object(Bucket=self.bucket, Key=photo_key)['Body'].read()
+            if not jpeg_sin_metadatos(datos):
                 _log('photo_rechazada', th=h[:8])
-                return 400, {'ok': False, 'error': 'validacion', 'campos': {'photo_key': 'El archivo no es una imagen válida.'}}
+                return 400, {'ok': False, 'error': 'validacion', 'campos': {'photo_key': 'La foto no es un JPEG válido o trae metadatos (EXIF, comentarios). Quitalos y volvé a subirla.'}}
 
         review_id = uuid.uuid4().hex
         now = _iso(_now())

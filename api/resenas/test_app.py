@@ -9,13 +9,12 @@ import json
 import unittest
 
 import app
-from fakes import FakeClientError, FakeS3
+from fakes import FakeClientError, FakeS3, jpeg, segmento
 
 TOKEN = 'Qx7_mLp2vR9tZkW4aB8cD1eF3gH5jK6n'
 OTRO_TOKEN = 'Zz0_' + 'a' * 28
-JPEG = b'\xff\xd8\xff\xe0' + b'\x00' * 20_000
+JPEG = jpeg()
 PNG = b'\x89PNG\r\n\x1a\n' + b'\x00' * 20_000
-WEBP = b'RIFF\x00\x00\x00\x00WEBP' + b'\x00' * 20_000
 
 
 def _ahora():
@@ -138,11 +137,11 @@ class Presign(Base):
         self.assertIn({'key': body['key']}, firma['conditions'])
 
     def test_no_consume_el_token(self):
-        self.svc.presign({'token': TOKEN, 'ext': 'png'})
+        self.svc.presign({'token': TOKEN, 'ext': 'jpg'})
         self.assertEqual(self.estado(), 'ok')
 
     def test_extension_no_permitida(self):
-        for ext in ['gif', 'JPG', '', None, ['jpg'], {'a': 1}]:
+        for ext in ['gif', 'JPG', 'png', 'webp', '', None, ['jpg'], {'a': 1}]:
             with self.subTest(ext=ext):
                 status, body = self.svc.presign({'token': TOKEN, 'ext': ext})
                 self.assertEqual((status, body['error']), (400, 'formato'))
@@ -390,8 +389,8 @@ class FotoDeLaResena(Base):
         h = app.token_hash(TOKEN)
         falsas = [
             ('jpg', PNG),
-            ('png', b'<script>alert(1)</script>' + b' ' * 20_000),
-            ('webp', JPEG),
+            ('jpg', b'<script>alert(1)</script>' + b' ' * 20_000),
+            ('jpg', JPEG + b'<script>alert(1)</script>'),  # datos después del EOI
         ]
         for ext, datos in falsas:
             with self.subTest(ext=ext):
@@ -399,26 +398,65 @@ class FotoDeLaResena(Base):
                 self.s3.objects[clave] = datos
                 status, body = self.svc.create_review(payload(photo_key=clave))
                 self.assertEqual((status, body['campos']),
-                                 (400, {'photo_key': 'El archivo no es una imagen válida.'}))
+                                 (400, {'photo_key': 'La foto no es un JPEG válido o trae metadatos (EXIF, comentarios). Quitalos y volvé a subirla.'}))
         self.assertEqual(self.estado(), 'ok')
 
-    def test_webp_valido_se_acepta(self):
-        clave = self.subir(WEBP, ext='webp')
-        status, _ = self.svc.create_review(payload(photo_key=clave))
-        self.assertEqual(status, 200)
+    def test_jpeg_con_metadatos_se_rechaza_y_no_consume_el_token(self):
+        casos = {
+            'EXIF con GPS': jpeg(segmentos_extra=segmento(0xE1, b'Exif\x00\x00GPS-SECRETO')),
+            'XMP': jpeg(segmentos_extra=segmento(0xE1, b'http://ns.adobe.com/xap/1.0/\x00<x:xmpmeta/>')),
+            'IPTC': jpeg(segmentos_extra=segmento(0xED, b'Photoshop 3.0\x00')),
+            'comentario': jpeg(segmentos_extra=segmento(0xFE, b'autor: Ana')),
+        }
+        for nombre, datos in casos.items():
+            with self.subTest(metadato=nombre):
+                clave = self.subir(datos)
+                status, body = self.svc.create_review(payload(photo_key=clave))
+                self.assertEqual((status, body['campos']),
+                                 (400, {'photo_key': 'La foto no es un JPEG válido o trae metadatos (EXIF, comentarios). Quitalos y volvé a subirla.'}))
+        self.assertEqual(self.estado(), 'ok')
+        self.assertEqual(self.resenas(), [])
 
 
-class Firmas(unittest.TestCase):
-    def test_sniff_reconoce_cada_formato(self):
-        self.assertTrue(app.sniff_ok(JPEG[:16], 'jpg'))
-        self.assertTrue(app.sniff_ok(PNG[:16], 'png'))
-        self.assertTrue(app.sniff_ok(WEBP[:16], 'webp'))
+class JpegSinMetadatos(unittest.TestCase):
+    def test_acepta_perfil_de_color_icc_que_agrega_el_navegador(self):
+        icc = segmento(0xE2, b'ICC_PROFILE\x00\x01\x01' + b'\x00' * 472)
+        self.assertTrue(app.jpeg_sin_metadatos(jpeg(segmentos_extra=icc)))
+        self.assertFalse(app.jpeg_sin_metadatos(jpeg(segmentos_extra=segmento(0xE2, b'FPXR\x00' + b'\x00' * 20))))
 
-    def test_sniff_rechaza_otros_contenidos(self):
-        self.assertFalse(app.sniff_ok(b'RIFF\x00\x00\x00\x00WAVE', 'webp'))
-        self.assertFalse(app.sniff_ok(PNG[:16], 'jpg'))
-        self.assertFalse(app.sniff_ok(JPEG[:16], 'gif'))
-        self.assertFalse(app.sniff_ok(b'', 'jpg'))
+    def test_acepta_jpeg_limpio_incluido_multiples_barridos(self):
+        self.assertTrue(app.jpeg_sin_metadatos(JPEG))
+        self.assertTrue(app.jpeg_sin_metadatos(jpeg(entropia=b'\xff\x00' * 9_000)))          # byte stuffing
+        self.assertTrue(app.jpeg_sin_metadatos(jpeg(entropia=b'x' * 8_000 + b'\xff\xd0' + b'y' * 8_000)))  # RST
+        progresivo = b'x' * 8_000 + segmento(0xC4, b'\x00' * 20) + segmento(0xDA, b'\x01\x01\x00\x00\x3f\x00') + b'y' * 8_000
+        self.assertTrue(app.jpeg_sin_metadatos(jpeg(entropia=progresivo)))                       # varios barridos
+
+    def test_rechaza_metadatos_en_cualquier_segmento(self):
+        casos = {
+            'EXIF': jpeg(segmentos_extra=segmento(0xE1, b'Exif\x00\x00GPS')),
+            'XMP': jpeg(segmentos_extra=segmento(0xE1, b'http://ns.adobe.com/xap/1.0/\x00')),
+            'IPTC': jpeg(segmentos_extra=segmento(0xED, b'Photoshop 3.0\x00')),
+            'COM': jpeg(segmentos_extra=segmento(0xFE, b'hola')),
+            'APP0 que no es JFIF': jpeg(app0=b'Exif\x00\x00'),
+            'metadato después de un barrido': jpeg(entropia=b'x' * 8_000 + segmento(0xE1, b'Exif\x00\x00') + b'y' * 8_000),
+        }
+        for nombre, datos in casos.items():
+            with self.subTest(caso=nombre):
+                self.assertFalse(app.jpeg_sin_metadatos(datos))
+
+    def test_rechaza_lo_que_no_es_un_jpeg_completo(self):
+        casos = {
+            'vacío': b'',
+            'PNG': PNG,
+            'sin SOI': b'\x00' + JPEG[1:],
+            'sin EOI': JPEG[:-2],
+            'truncado': JPEG[:len(JPEG) // 2],
+            'datos después del EOI': JPEG + b'extra',
+            'longitud inválida': b'\xff\xd8\xff\xe0\x00\x01',
+        }
+        for nombre, datos in casos.items():
+            with self.subTest(caso=nombre):
+                self.assertFalse(app.jpeg_sin_metadatos(datos))
 
 
 class Compensacion(Base):
@@ -505,7 +543,7 @@ class Handler(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_cuerpo_en_base64(self):
-        status, _, _ = self.llamar('POST', '/presign', json.dumps({'token': TOKEN, 'ext': 'png'}), codificado=True)
+        status, _, _ = self.llamar('POST', '/presign', json.dumps({'token': TOKEN, 'ext': 'jpg'}), codificado=True)
         self.assertEqual(status, 200)
 
     def test_base64_o_utf8_invalidos_dan_400(self):

@@ -76,7 +76,7 @@ def sembrar(s3):
 
     casos = {
         'ok1': registro(), 'ok2': registro(), 'ok3': registro(), 'ok4': registro(),
-        'ok5': registro(), 'ok6': registro(),
+        'ok5': registro(), 'ok6': registro(), 'ok7': registro(),
         'usado': registro(),
         'vencido': registro(expires_at=_iso(ahora - dt.timedelta(days=1))),
         'revocado': registro(revoked=True),
@@ -170,10 +170,13 @@ class Handler(BaseHTTPRequestHandler):
         for clave in sorted(k for k in S3.objects if k.startswith('resenas/')):
             r = json.loads(S3.objects[clave])
             if r.get('photo_key'):
-                cabecera = S3.objects[r['photo_key']][:3].hex()
+                datos = S3.objects[r['photo_key']]
+                extra = {'foto_cabecera': datos[:3].hex(),
+                         'foto_jpeg_limpio': app.jpeg_sin_metadatos(datos),
+                         'foto_tiene_exif': b'Exif\x00\x00' in datos}
             else:
-                cabecera = None
-            resenas.append({**r, 'foto_cabecera': cabecera})
+                extra = {'foto_cabecera': None, 'foto_jpeg_limpio': None, 'foto_tiene_exif': None}
+            resenas.append({**r, **extra})
         claims = sorted(k for k in S3.objects if k.startswith('claims/'))
         return {'resenas': resenas, 'claims': len(claims),
                 'pendientes': sorted(k for k in S3.objects if k.startswith('pendientes/'))}
