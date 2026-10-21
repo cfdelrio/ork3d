@@ -1817,14 +1817,40 @@ html.js [data-reveal].is-in {
 }
 
 /* ============== FOTOGRAFÍA · PIEZAS REALES ============== */
-.mosaic {
+.piezas {
   display: flex;
   flex-direction: column;
   gap: 48px;
 }
-.mosaic__item {
+.piezas__col { display: contents; }
+.piezas__intro { order: 1; }
+.piezas__bar {
+  display: block;
+  width: 48px;
+  height: 4px;
+  margin-bottom: 28px;
+  border-radius: 2px;
+  background: var(--color-lime);
+}
+.piezas__title {
   margin: 0;
-  min-width: 0;
+  text-align: left;
+  font-size: clamp(34px, 3.1vw, 46px);
+  line-height: 1.05;
+}
+.piezas__title .accent { display: block; }
+.piezas__lead {
+  margin: 22px 0 0;
+  max-width: 470px;
+  text-align: left;
+}
+.mosaic__item { margin: 0; min-width: 0; }
+.mosaic__item--main { order: 2; }
+.piezas__tiles {
+  order: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
 }
 .mosaic__item picture { display: block; }
 .mosaic__item img {
@@ -1835,22 +1861,80 @@ html.js [data-reveal].is-in {
 }
 .mosaic__item--series { max-width: 560px; }
 .mosaic__item--small { max-width: 260px; }
-.mosaic__label {
-  margin-top: 12px;
+.mosaic__label { margin: 14px 0 0; color: var(--text-dim); }
+.mosaic__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mosaic__icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--color-lime);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mosaic__name {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--color-cream);
+  white-space: nowrap;
+}
+.mosaic__rule {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.25;
+}
+.mosaic__caption {
+  display: block;
+  min-height: 3.2em;
+  margin: 6px 0 0 28px;
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+@media (max-width: 1099px) {
+  .mosaic__item--main { max-width: 640px; }
 }
 @media (min-width: 1100px) {
-  .mosaic {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 0;
+  .piezas {
+    display: grid;
+    grid-template-columns: minmax(0, 0.88fr) minmax(0, 1fr);
+    column-gap: 56px;
+    align-items: start;
   }
-  .mosaic__item--main   { width: 54%; }
-  .mosaic__item--series { width: 23%; max-width: none; }
-  .mosaic__item--small  { width: 15%; max-width: none; }
+  .piezas__col {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 40px;
+    align-self: stretch;
+    --tile-h: clamp(260px, 21vw, 300px);
+  }
+  .piezas__intro,
+  .piezas__tiles,
+  .mosaic__item--main { order: 0; }
+  .piezas__tiles {
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 24px;
+  }
+  .mosaic__item--series,
+  .mosaic__item--small { max-width: none; flex: none; }
+  .mosaic__item--series { width: calc(var(--tile-h) * 0.85); }
+  .mosaic__item--small { width: calc(var(--tile-h) * 0.67); }
+  .mosaic__item--series img,
+  .mosaic__item--small img { height: var(--tile-h); object-fit: cover; }
+  .mosaic__item--main {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-self: stretch;
+  }
 }

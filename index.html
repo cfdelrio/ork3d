@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/assets/css/styles.css?v=12" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=13" />
 
 <script type="application/ld+json">
 {
@@ -349,35 +349,61 @@
 
 <!-- PIEZAS REALES -->
 <section class="section theme-ink" id="piezas" aria-labelledby="piezas-titulo">
-  <div class="container">
-    <h2 class="section__title section__title--center" id="piezas-titulo" data-reveal>Hecho para cada idea. <span class="accent">Preparado para repetirla.</span></h2>
-    <p class="section__lead">Desde una pieza personalizada hasta una serie completa, diseñamos y producimos objetos con identidad propia.</p>
-    <div class="mosaic">
-      <figure class="mosaic__item mosaic__item--main" data-reveal>
-        <picture>
-          <source type="image/avif" sizes="(min-width: 1280px) 622px, (min-width: 1100px) 54vw, 100vw" srcset="/assets/img/fotos/produccion-640.avif 640w, /assets/img/fotos/produccion-920.avif 920w">
-          <source type="image/webp" sizes="(min-width: 1280px) 622px, (min-width: 1100px) 54vw, 100vw" srcset="/assets/img/fotos/produccion-640.webp 640w, /assets/img/fotos/produccion-920.webp 920w">
-          <img src="/assets/img/fotos/produccion-920.webp" width="920" height="570" loading="lazy" decoding="async" alt="Pieza personalizada con el número 40 frente a una impresora 3D en producción">
-        </picture>
-        <figcaption class="mosaic__label">Producción</figcaption>
-      </figure>
-      <figure class="mosaic__item mosaic__item--series" data-reveal>
-        <picture>
-          <source type="image/avif" sizes="(min-width: 1100px) 19vw, 100vw" srcset="/assets/img/fotos/series-640.avif 640w, /assets/img/fotos/series-800.avif 800w">
-          <source type="image/webp" sizes="(min-width: 1100px) 19vw, 100vw" srcset="/assets/img/fotos/series-640.webp 640w, /assets/img/fotos/series-800.webp 800w">
-          <img src="/assets/img/fotos/series-800.webp" width="800" height="769" loading="lazy" decoding="async" alt="Piezas blancas idénticas impresas en 3D sobre una superficie oscura">
-        </picture>
-        <figcaption class="mosaic__label">Series</figcaption>
-      </figure>
-      <figure class="mosaic__item mosaic__item--small" data-reveal>
-        <picture>
-          <source type="image/avif" sizes="(min-width: 1100px) 12vw, 260px" srcset="/assets/img/fotos/personalizacion-470.avif 470w">
-          <source type="image/webp" sizes="(min-width: 1100px) 12vw, 260px" srcset="/assets/img/fotos/personalizacion-470.webp 470w">
-          <img src="/assets/img/fotos/personalizacion-470.webp" width="470" height="700" loading="lazy" decoding="async" alt="Llavero impreso en 3D con forma de ladrillo rojo, sostenido en una mano">
-        </picture>
-        <figcaption class="mosaic__label">Personalización</figcaption>
-      </figure>
+  <div class="container piezas">
+    <div class="piezas__col">
+      <div class="piezas__intro">
+        <span class="piezas__bar" aria-hidden="true"></span>
+        <h2 class="section__title piezas__title" id="piezas-titulo" data-reveal>Hecho para cada idea. <span class="accent">Preparado para repetirla.</span></h2>
+        <p class="section__lead piezas__lead">Desde una pieza personalizada hasta una serie completa, diseñamos y producimos objetos con identidad propia.</p>
+      </div>
+      <div class="piezas__tiles">
+        <figure class="mosaic__item mosaic__item--series" data-reveal>
+          <picture>
+            <source type="image/avif" sizes="(min-width: 1100px) 19vw, 100vw" srcset="/assets/img/fotos/series-640.avif 640w, /assets/img/fotos/series-800.avif 800w">
+            <source type="image/webp" sizes="(min-width: 1100px) 19vw, 100vw" srcset="/assets/img/fotos/series-640.webp 640w, /assets/img/fotos/series-800.webp 800w">
+            <img src="/assets/img/fotos/series-800.webp" width="800" height="769" loading="lazy" decoding="async" alt="Piezas blancas idénticas impresas en 3D sobre una superficie oscura">
+          </picture>
+          <figcaption class="mosaic__label">
+            <span class="mosaic__head">
+              <svg class="mosaic__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+              <span class="mosaic__name">Series</span>
+              <span class="mosaic__rule" aria-hidden="true"></span>
+            </span>
+            <span class="mosaic__caption">Unidades con la misma calidad</span>
+          </figcaption>
+        </figure>
+        <figure class="mosaic__item mosaic__item--small" data-reveal>
+          <picture>
+            <source type="image/avif" sizes="(min-width: 1100px) 16vw, 260px" srcset="/assets/img/fotos/personalizacion-470.avif 470w">
+            <source type="image/webp" sizes="(min-width: 1100px) 16vw, 260px" srcset="/assets/img/fotos/personalizacion-470.webp 470w">
+            <img src="/assets/img/fotos/personalizacion-470.webp" width="470" height="700" loading="lazy" decoding="async" alt="Llavero impreso en 3D con forma de ladrillo rojo, sostenido en una mano">
+          </picture>
+          <figcaption class="mosaic__label">
+            <span class="mosaic__head">
+              <svg class="mosaic__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>
+              <span class="mosaic__name">Personalización</span>
+              <span class="mosaic__rule" aria-hidden="true"></span>
+            </span>
+            <span class="mosaic__caption">Objetos con tu identidad</span>
+          </figcaption>
+        </figure>
+      </div>
     </div>
+    <figure class="mosaic__item mosaic__item--main" data-reveal>
+      <picture>
+        <source type="image/avif" sizes="(min-width: 1100px) 40vw, 100vw" srcset="/assets/img/fotos/produccion-retrato-640.avif 640w, /assets/img/fotos/produccion-retrato-740.avif 740w">
+        <source type="image/webp" sizes="(min-width: 1100px) 40vw, 100vw" srcset="/assets/img/fotos/produccion-retrato-640.webp 640w, /assets/img/fotos/produccion-retrato-740.webp 740w">
+        <img src="/assets/img/fotos/produccion-retrato-740.webp" width="740" height="800" loading="lazy" decoding="async" alt="Pieza personalizada con el número 40 frente a una impresora 3D en producción">
+      </picture>
+      <figcaption class="mosaic__label">
+        <span class="mosaic__head">
+          <svg class="mosaic__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/></svg>
+          <span class="mosaic__name">Producción</span>
+          <span class="mosaic__rule" aria-hidden="true"></span>
+        </span>
+        <span class="mosaic__caption">De la idea a grandes series</span>
+      </figcaption>
+    </figure>
   </div>
 </section>
 
