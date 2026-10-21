@@ -30,6 +30,8 @@ jobs:
   deploy:
     name: Sync + invalidate
     runs-on: ubuntu-latest
+    # Solo main puede desplegar a producción: un run manual sobre otra rama se salta este job.
+    if: github.ref == 'refs/heads/main'
     environment: production
     steps:
       - name: Checkout
