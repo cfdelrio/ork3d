@@ -768,8 +768,8 @@ caso('avisos: "Reenviar aviso" aparece si el correo sigue pendiente y muestra el
   }
 });
 
-caso('diseño: bandeja y detalle sin scroll horizontal a 375, 390, 768 y 1440 px', async (browser) => {
-  for (const ancho of [375, 390, 768, 1440]) {
+caso('diseño: bandeja y detalle sin scroll horizontal a 375, 390, 430, 768 y 1440 px', async (browser) => {
+  for (const ancho of [375, 390, 430, 768, 1440]) {
     for (const ruta of ['/admin/resenas', `/admin/resenas/${resenas.C}`]) {
       const s = await abrirPagina(browser, { conSesion: true, ancho });
       try {
