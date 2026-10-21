@@ -90,6 +90,29 @@ else
   echo "Cuenta AWS: ${ACCOUNT_ID} · región: ${REGION}"
 fi
 
+# Lista exacta de lo que se crea o actualiza, y su costo. Se imprime en dry-run y en modo real.
+resumen_recursos() {
+  cat <<EOF
+Recursos que este script crea o actualiza (región ${REGION}, cuenta ${ACCOUNT_ID}):
+  1. S3 bucket privado       ${RESENAS_BUCKET}: sin acceso público, versionado, cifrado SSE-S3,
+                              pendientes/ vence a los 2 días, versiones anteriores a los 30 días,
+                              CORS solo POST desde ${ALLOWED_ORIGIN}, política que niega HTTP sin TLS.
+  2. Rol IAM                 ${ROLE}: lee tokens/, claims/, resenas/, pendientes/; escribe claims/,
+                              resenas/, pendientes/; borra claims/ (rollback). Nada más.
+  3. Lambda                  ${FUNCTION}: python3.12, 256 MB, timeout 10 s, concurrencia reservada ${CONCURRENCY}.
+  4. Function URL            AuthType NONE, sin CORS propio (la Lambda responde CORS y el preflight).
+  5. Permiso de invocación   FunctionURLAllowPublicAccess (lambda:InvokeFunctionUrl, principal *).
+  6. CloudWatch Logs         /aws/lambda/${FUNCTION}: retención de 30 días.
+  7. CloudFront Function     ${FN_NAME}: nueva versión publicada con la regla /opinar/*.
+Costo fijo: USD 0 al mes (no hay servidores ni recursos encendidos todo el tiempo).
+Costo variable potencial: menos de USD 0,30 al mes con 10 a 1.000 reseñas al mes en el primer año
+(Lambda, CloudFront y CloudWatch quedan en sus capas gratuitas; S3 cobra centavos). El costo de S3 crece
+si el export relee todas las reseñas: ver docs/resenas/README.md, sección "Costos".
+EOF
+}
+resumen_recursos
+echo
+
 # ── 1. Bucket privado ──────────────────────────────────────────────────────
 log "Bucket privado s3://${RESENAS_BUCKET}"
 if ! existe aws s3api head-bucket --bucket "$RESENAS_BUCKET"; then
