@@ -1,17 +1,17 @@
 # Runbook de despliegue manual · reseñas ORK3D (V1, prueba controlada)
 
-**Estado: listo para ejecutar desde tu máquina. No ejecutado.** Este documento no crea ni modifica nada por sí solo.
+**Estado: la infraestructura de AWS se creó desde la máquina del operador. Este documento refleja lo aprendido en esa ejecución (sección 17).** Pendientes: `config.js`, deploy del frontend, smoke test de cliente y merge a `main`. Este documento no crea ni modifica nada por sí solo.
 Cada comando se corre a mano, en orden, y cada paso tiene una salida esperada. Si una salida no coincide, **parás**.
 
-Qué crea el despliegue de infraestructura: un bucket S3 privado, un rol IAM mínimo, una Lambda con Function URL,
-su concurrencia reservada, un log group con retención de 30 días y una nueva versión de la CloudFront Function
-`ork3d-redirect-www` con la regla `/opinar/*`. **No toca** la distribución de CloudFront, el bucket del sitio, DNS,
-certificados, `config.js`, `main` ni la home.
+Qué crea el despliegue de infraestructura: un bucket S3 privado, un rol IAM mínimo, un log group con retención de 30 días,
+una Lambda con Function URL (con sus dos permisos de invocación), concurrencia reservada solo si la cuenta tiene margen,
+y una nueva versión de la CloudFront Function `ork3d-redirect-www` con la regla `/opinar/*`. **No toca** la distribución
+de CloudFront, el bucket del sitio, DNS, certificados, `config.js`, `main` ni la home.
 
 Reglas:
 
 - Nada se borra automáticamente. Los rollbacks son comandos manuales (sección 15).
-- `DRY_RUN=1` antes que `DRY_RUN=0`, siempre.
+- `DRY_RUN=1` antes que `DRY_RUN=0`, siempre. La infraestructura ya existe: `DRY_RUN=0` solo con autorización explícita.
 - Ningún account ID, distribution ID, URL real ni credencial se commitea. Van en `infra/.env` (ignorado por git)
   o en tu shell.
 - Los comandos de AWS usan `--profile "$AWS_PROFILE"`. No hay access keys en archivos ni en comandos.
@@ -23,31 +23,36 @@ Reglas:
 
 | Punto | Resultado |
 | --- | --- |
-| Compatible con macOS y Linux | Sí. No usa features de bash 4+ ni flags exclusivos de GNU. Probado con bash 5.2 y con un `aws` de prueba local. **No probado contra AWS real.** |
+| Compatible con macOS y Linux | Sin features de bash 4+ ni flags exclusivos de GNU (revisado a mano). Probado con bash 5.2 y con un `aws` de prueba (`infra/tests`). Ejecutado contra AWS real desde la máquina del operador (sección 17). **Bash 3.2 y macOS: no probados.** |
 | AWS CLI v2 | El modo real lo verifica: `aws --version` debe empezar con `aws-cli/2`. |
 | `jq` y `zip` | Obligatorios. Se verifican al arrancar. |
 | Dry-run por defecto | Sí: `DRY_RUN=1`. El dry-run no llama a AWS (verificado: 0 llamadas reales). |
 | Credenciales | El script no lee credenciales. Usa el profile de AWS CLI (`AWS_PROFILE`). |
 | Confirmación antes de cambiar nada | Sí, en modo real: hay que escribir `CREAR`. |
-| Chequeos previos de solo lectura | Sí, en modo real: bucket del sitio accesible, distribución con alias `ork3d.com`, función de redirección en LIVE. Si falla uno, corta sin cambios. |
+| Chequeos previos de solo lectura | Sí, en modo real: bucket del sitio accesible, distribución con alias `ork3d.com`, función de redirección en LIVE, y AWS CLI con `--invoked-via-function-url`. Si falla uno, corta sin cambios. |
 | Borrados | Ninguno. El script no contiene `delete-*`, `--recursive` ni `s3 rm` (verificado en `dev/validar.py`). |
 
-Cambios aplicados en esta revisión:
+Estado actual del script (los hallazgos del despliegue real están detallados en la sección 17):
 
-1. El bucket privado **ya no tiene un nombre fijo**. Si no definís `RESENAS_BUCKET`, se deriva del account ID:
+1. El bucket privado **no tiene un nombre fijo**. Si no definís `RESENAS_BUCKET`, se deriva del account ID:
    `ork3d-resenas-privado-<ACCOUNT_ID>`. Se valida el formato de nombre S3.
-2. Chequeos previos de solo lectura antes de cualquier cambio (punto anterior).
+2. Chequeos previos de solo lectura antes de cualquier cambio (tabla de arriba).
 3. Confirmación interactiva con `CREAR`.
-4. La retención del log group (30 días) se fija **después** de la invocación de verificación. Antes podía fallar: Lambda
-   crea el grupo de logs recién en la primera invocación.
-5. La descripción de la Lambda quedó en ASCII (algunos validadores de AWS rechazan caracteres no ASCII).
-6. Corregido un bug de la verificación que mostraba `HTTP 000000` cuando no había respuesta.
+4. **Función URL con dos permisos.** `lambda:InvokeFunctionUrl` (AuthType NONE) y `lambda:InvokeFunction` con
+   `lambda:InvokedViaFunctionUrl = true`. Sin el segundo, la URL responde 403. Ambos se detectan por contenido de la
+   política, no por nombre.
+5. **Log group antes de la Lambda.** Se crea y recibe retención de 30 días antes de `create-function`. Así la primera
+   invocación no crea el grupo sin retención.
+6. **Concurrencia reservada opcional.** Solo se reserva si la cuenta tiene margen (sección 3.2).
+7. **`s3:ListBucket` sobre el bucket**, sin prefijo. Sin ese permiso, una clave inexistente da `AccessDenied`, y la API
+   respondía 500 en lugar de `{"ok": false, "motivo": "invalido"}`.
+8. La descripción de la Lambda quedó en ASCII (algunos validadores de AWS rechazan caracteres no ASCII).
+9. Corregido un bug de la verificación que mostraba `HTTP 000000` cuando no había respuesta.
 
 Limitaciones conocidas:
 
-- `put-function-concurrency` puede fallar en cuentas nuevas con poco margen de concurrencia. El script lo avisa y
-  sigue. Hay que fijarla a mano (comando en la sección 9).
-- Si la verificación de la API devuelve `Forbidden`, falta un permiso de invocación pública. Ver sección 11.
+- La concurrencia reservada no se configura si la cuenta no tiene margen. Es lo esperado en una cuenta con límite bajo (sección 3.2).
+- Si la verificación de la API devuelve `Forbidden` o `HTTP 403`, falta uno de los dos permisos de la Function URL. Ver sección 11.
 
 ---
 
@@ -56,8 +61,8 @@ Limitaciones conocidas:
 | Herramienta | Mínimo | Cómo verificar | Notas |
 | --- | --- | --- | --- |
 | macOS o Linux | — | `uname -s` | |
-| bash | 3.2 (probado en 5.2) | `bash --version` | El script de infra corre con bash 3.2 (el de macOS). Si algún otro script falla, `brew install bash`. |
-| AWS CLI | **v2** | `aws --version` → `aws-cli/2.x` | Recomendado: versión reciente, para `s3api put-object --if-none-match` (sección 13). |
+| bash | 3.2 (probado en 5.2) | `bash --version` | Probado con bash 5.2. Bash 3.2 (el de macOS) no está probado para el script de infra. Si algún otro script falla, `brew install bash`. |
+| AWS CLI | **v2** | `aws --version` → `aws-cli/2.x` | Versión reciente: el script exige `--invoked-via-function-url` (chequeo previo), y la prueba 13.1 usa `put-object --if-none-match`. |
 | jq | 1.6 | `jq --version` | macOS: `brew install jq`. Debian/Ubuntu: `sudo apt install jq`. |
 | zip | cualquiera | `zip -v` | Viene en macOS y en la mayoría de las distros. |
 | curl | cualquiera | `curl --version` | |
@@ -93,7 +98,7 @@ AWS_REGION="us-east-1"
 RESENAS_BUCKET="ork3d-resenas-privado-<TU_ACCOUNT_ID>"    # sección 3.1
 ALLOWED_ORIGIN="https://ork3d.com"
 GOOGLE_REVIEW_URL=""
-RESENAS_LAMBDA_CONCURRENCY="5"
+RESENAS_LAMBDA_CONCURRENCY="5"        # opcional: se reserva solo con margen en la cuenta (sección 3.2)
 ```
 
 En la shell, antes de cada sesión (sin credenciales):
@@ -111,7 +116,8 @@ export AWS_PROFILE=ork3d
 | `RESENAS_BUCKET` | recomendada | `ork3d-resenas-privado-<TU_ACCOUNT_ID>` | Ver 3.1. Si no la definís, el script la deriva con el mismo patrón. |
 | `ALLOWED_ORIGIN` | sí | `https://ork3d.com` | Default del script. |
 | `GOOGLE_REVIEW_URL` | no | vacía | Cuando tengas el enlace de la reseña en Google. |
-| `RESENAS_LAMBDA_CONCURRENCY` | no | `5` | Default. Límite de concurrencia: freno a abuso y costo. |
+| `RESENAS_LAMBDA_CONCURRENCY` | no | `5` | Default. Se reserva solo si la cuenta tiene margen (3.2). Si no, el script lo informa y sigue. |
+| `IAM_PROPAGATION_SECONDS` | no | `10` | Espera tras crear el rol, para que IAM propague. Las pruebas la fijan en 0. |
 | `RESENAS_FUNCTION` / `RESENAS_ROLE` | no | `ork3d-resenas` / `ork3d-resenas-lambda` | Defaults. No cambiarlos salvo conflicto. |
 
 ### 3.1 Nombre del bucket
@@ -127,6 +133,20 @@ Reemplazá `<TU_ACCOUNT_ID>` por ese valor **en tu `infra/.env` local**. No lo e
 `admin/.env.example`, ni en ningún documento que se commitee.
 
 Reglas del nombre: minúsculas, números, puntos y guiones, de 3 a 63 caracteres. El script lo valida.
+
+### 3.2 Concurrencia reservada (opcional)
+
+AWS exige que, después de reservar concurrencia para una función, queden **al menos 10** sin reservar en la cuenta.
+Con `RESENAS_LAMBDA_CONCURRENCY=5`, la cuenta necesita **al menos 15** sin reservar (`UnreservedConcurrentExecutions`
+en `get-account-settings`).
+
+- Si hay margen, el script reserva la concurrencia.
+- Si no hay margen, imprime `Reserved concurrency omitida: límite de cuenta insuficiente.` y **sigue**. La Lambda
+  funciona igual: la reserva es un freno a costo ante abuso, no un requisito funcional.
+
+En la ejecución real la cuenta tenía 10 sin reservar, así que la reserva de 5 se omitió (sección 17, hallazgo 3).
+Para reservarla después: pedir un aumento del límite de concurrencia en Service Quotas y correr el comando manual
+de la sección 9.
 
 ---
 
@@ -249,6 +269,10 @@ aws lambda get-function --function-name ork3d-resenas --profile "$AWS_PROFILE" >
 aws logs describe-log-groups --log-group-name-prefix /aws/lambda/ork3d-resenas \
   --profile "$AWS_PROFILE" --query 'logGroups[].logGroupName' --output text
 
+# Margen de concurrencia de la cuenta (solo lectura). Esperado: un número. Ver sección 3.2.
+aws lambda get-account-settings --profile "$AWS_PROFILE" \
+  --query 'AccountLimit.UnreservedConcurrentExecutions' --output text
+
 # Función de redirección que vamos a actualizar (debe existir en LIVE)
 aws cloudfront describe-function --name ork3d-redirect-www --stage LIVE \
   --profile "$AWS_PROFILE" --query 'FunctionSummary.Name' --output text
@@ -260,7 +284,8 @@ aws lambda list-functions --max-items 1 --profile "$AWS_PROFILE" --query 'Functi
 ```
 
 Esperado: el bucket libre; el rol y la Lambda "no existe" (primera vez); el log group vacío; el nombre
-`ork3d-redirect-www`; los tres listados devuelven un valor o `None` (sin error).
+`ork3d-redirect-www`; los tres listados devuelven un valor o `None` (sin error); la concurrencia sin reservar es un
+número. Si es menor que 15, la reserva se omitirá: es esperado (sección 3.2).
 
 ### Bloque 4: respaldo de la CloudFront Function actual (para el rollback)
 
@@ -288,10 +313,11 @@ dev/suite.sh                          # esperado: "Suite: todas las capas en ver
 
 Esperado de `dev/suite.sh` (todas las capas en verde, 0 fallos, 0 skipped):
 
-- API y contrato: `Ran 73 tests` → `OK`.
+- API y contrato: `Ran 76 tests` → `OK`.
+- Infra (script y políticas, sin AWS): `Ran 18 tests` → `OK`.
 - CLI de moderación: `Resultado: 97 PASS, 0 FAIL`.
 - Navegador: `24/24 casos OK`.
-- Validaciones estáticas: `Validaciones: 63 PASS, 0 FAIL`.
+- Validaciones estáticas: `Validaciones: 65 PASS, 0 FAIL`.
 
 Si cualquier capa falla: **no desplegar**.
 
@@ -302,25 +328,28 @@ cd "$REPO"
 DRY_RUN=1 infra/resenas-setup.sh > "$HOME/ork3d-dryrun.log" 2>&1
 echo "exit=$?"
 echo "llamadas reales a AWS (esperado 0): $(grep -c '^  \$ aws' "$HOME/ork3d-dryrun.log")"
-echo "llamadas simuladas (esperado 18): $(grep -c '\[dry-run\] aws' "$HOME/ork3d-dryrun.log")"
+echo "llamadas simuladas (esperado 19): $(grep -c '\[dry-run\] aws' "$HOME/ork3d-dryrun.log")"
 ```
 
-Esperado: `exit=0`, `llamadas reales a AWS: 0`, `llamadas simuladas: 18`.
+Esperado: `exit=0`, `llamadas reales a AWS: 0`, `llamadas simuladas: 19`.
 
 ---
 
 ## 7. Dry-run: qué tiene que mostrar (D)
 
-Leé el log completo: `less "$HOME/ork3d-dryrun.log"`. Las 18 llamadas simuladas se agrupan así:
+Leé el log completo: `less "$HOME/ork3d-dryrun.log"`. Las 19 llamadas simuladas se agrupan así, en el orden del script:
 
 | Paso | Llamadas simuladas | Qué crea o cambia |
 | --- | --- | --- |
 | 1. Bucket | 7: `create-bucket`, `put-public-access-block`, `put-bucket-versioning`, `put-bucket-encryption`, `put-bucket-lifecycle-configuration`, `put-bucket-cors`, `put-bucket-policy` | Bucket privado con todas sus propiedades |
-| 2. Rol | 3: `create-role`, `put-role-policy`, `attach-role-policy` | Rol IAM mínimo |
-| 3. Lambda | 3: `create-function`, `wait function-active-v2`, `put-function-concurrency` | Lambda, 256 MB, timeout 10 s, concurrencia 5 |
-| 4. Function URL | 2: `create-function-url-config`, `add-permission` | URL pública sin CORS propio |
-| 5. CloudFront | 2: `update-function`, `publish-function` | Nueva versión de `ork3d-redirect-www` |
-| 6. Logs | 1: `put-retention-policy` | Retención de 30 días |
+| 2. Rol | 3: `create-role`, `put-role-policy`, `attach-role-policy` | Rol IAM mínimo, con `ListBucket` sobre el bucket |
+| 3. Log group | 2: `create-log-group`, `put-retention-policy` | Log group con retención de 30 días, antes de la Lambda |
+| 4. Lambda | 2: `create-function`, `wait function-active-v2` | Lambda, python3.12, 256 MB, timeout 10 s |
+| 5. Concurrencia | 0: solo una línea `[dry-run] consultar aws lambda get-account-settings; ...` | Se decide en modo real, con margen (sección 3.2) |
+| 6. Function URL | 3: `create-function-url-config`, `add-permission` (`FunctionURLAllowPublicAccess`), `add-permission` (`FunctionURLAllowInvokeViaUrl`) | URL pública sin CORS propio, con sus dos permisos |
+| 7. CloudFront | 2: `update-function`, `publish-function` | Nueva versión de `ork3d-redirect-www` |
+
+Total: 7 + 3 + 2 + 2 + 0 + 3 + 2 = **19** llamadas simuladas.
 
 Y el resumen al principio del log: 7 recursos, costo fijo USD 0, costo variable potencial menor a USD 0,30 al mes.
 
@@ -334,7 +363,7 @@ Marcá cada ítem antes de la ejecución real. Si alguno no coincide: parar.
 
 - [ ] Región: `us-east-1` (o la que definiste en `AWS_REGION`).
 - [ ] Bucket: `ork3d-resenas-privado-<tu account>`, en minúsculas, sin el placeholder `<ACCOUNT_ID>` si la ejecución es real.
-- [ ] Hay exactamente 7 recursos en el resumen (bucket, rol, Lambda, Function URL, permiso de invocación, log group, CloudFront Function).
+- [ ] Hay exactamente 7 recursos en el resumen (bucket, rol, log group, Lambda, Function URL, permisos de invocación, CloudFront Function).
 - [ ] Servicios en el log, solo estos: `grep -o 'aws [a-z0-9-]*' "$HOME/ork3d-dryrun.log" | sort | uniq -c` debe dar `cloudfront`, `iam`, `lambda`, `logs` y `s3api`.
 - [ ] Ningún servicio prohibido: `grep -i -E 'aws (ec2|rds|elasticache|apigateway|apigatewayv2|ecs|eks|elb|elbv2|nat)' "$HOME/ork3d-dryrun.log"` no devuelve nada.
 - [ ] Ningún borrado: `grep -E 'delete|--recursive|s3 rm' "$HOME/ork3d-dryrun.log"` no devuelve nada.
@@ -344,10 +373,11 @@ Marcá cada ítem antes de la ejecución real. Si alguno no coincide: parar.
 - [ ] Lifecycle: `pendientes/` vence a los 2 días y las versiones no actuales a los 30 días (`infra/resenas/bucket-lifecycle.json`).
 - [ ] CORS: origen `https://ork3d.com`, método `POST` (`infra/resenas/bucket-cors.json`).
 - [ ] Política del bucket: niega tráfico sin TLS (`infra/resenas/bucket-policy.json`).
-- [ ] Rol: lee `tokens/`, `claims/`, `resenas/`, `pendientes/`; escribe `claims/`, `resenas/`, `pendientes/`; borra `claims/`. Ningún comodín (`infra/resenas/lambda-permisos.json`).
-- [ ] Lambda: `python3.12`, 256 MB, timeout 10 s, concurrencia reservada 5.
+- [ ] Rol: lee `tokens/`, `claims/`, `resenas/`, `pendientes/`; escribe `claims/`, `resenas/`, `pendientes/`; borra `claims/`; lista solo el bucket (`ListBucket`, sin prefijo). Ningún comodín (`infra/resenas/lambda-permisos.json`).
+- [ ] Lambda: `python3.12`, 256 MB, timeout 10 s. Concurrencia reservada solo si la cuenta tiene margen (sección 3.2); su ausencia es válida.
+- [ ] Function URL: dos permisos de invocación (`FunctionURLAllowPublicAccess` y `FunctionURLAllowInvokeViaUrl`).
 - [ ] Variables de entorno de la Lambda: `RESENAS_BUCKET`, `ALLOWED_ORIGIN`, `GOOGLE_REVIEW_URL`. Ningún secreto.
-- [ ] Log group con retención de 30 días.
+- [ ] Log group: aparece antes que la Lambda y con retención de 30 días.
 - [ ] CloudFront: solo `update-function` y `publish-function` sobre `ork3d-redirect-www`. No aparece `update-distribution`.
 - [ ] El log no contiene ningún account ID real (solo el placeholder `<ACCOUNT_ID>`, o tu bucket local si lo definiste).
 - [ ] Bloques 1 a 6 de la sección 6 completos, con las salidas esperadas.
@@ -355,6 +385,8 @@ Marcá cada ítem antes de la ejecución real. Si alguno no coincide: parar.
 ---
 
 ## 9. Ejecución real (F)
+
+**Ya se ejecutó en producción**, con una versión anterior a los cambios de la sección 17. **No volver a correrlo sin autorización explícita.** Esta sección queda como referencia para reconstruir la infraestructura en otra cuenta.
 
 Solo después de completar la checklist. Desde la raíz del repo y con el profile activo:
 
@@ -372,27 +404,30 @@ El log queda en tu máquina. Contiene tu account ID: no lo compartas en público
 | --- | --- | --- |
 | 1 | `Cuenta AWS: <tu ID> · región: us-east-1 · profile: ork3d` | Si la cuenta no es la esperada: `Ctrl-C` ahora. |
 | 2 | El resumen de 7 recursos. | — |
-| 3 | `▶ Chequeos previos (solo lectura)` con tres líneas `OK`: bucket del sitio, alias `ork3d.com`, función en LIVE. | Cualquier `ERROR` corta sin cambios. Corregir la causa y volver a empezar. |
+| 3 | `▶ Chequeos previos (solo lectura)` con cuatro líneas `OK`: bucket del sitio, alias `ork3d.com`, función en LIVE y soporte de `--invoked-via-function-url` en la CLI. | Cualquier `ERROR` corta sin cambios. Corregir la causa y volver a empezar. |
 | 4 | El aviso de qué se va a crear, y el prompt: `Escribí CREAR para continuar`. | Escribir `CREAR` (exacto, en mayúsculas). Cualquier otra cosa cancela: `Cancelado. No se modificó AWS.` |
 | 5 | `▶ Bucket privado` con `$ aws s3api create-bucket` (solo la primera vez) y seis `$ aws s3api put-…`. Sin errores. | `BucketAlreadyExists`: el nombre lo tiene otra cuenta. Cambiá `RESENAS_BUCKET` en `infra/.env` y empezá de nuevo. |
 | 6 | `▶ Rol ork3d-resenas-lambda`, después `esperando la propagación de IAM…` (10 s). | `The role defined for the function cannot be assumed`: esperá un minuto y relanzá. |
-| 7 | `▶ Lambda ork3d-resenas`: `create-function` (primera vez), `wait function-active-v2` (30 s a 1 min), `put-function-concurrency`. | Si ves `⚠ No se pudo fijar la concurrencia`: ver el comando manual abajo. |
-| 8 | `▶ Function URL`: `create-function-url-config` y `add-permission` (o `el permiso ya existía`). | — |
-| 9 | `▶ CloudFront Function ork3d-redirect-www`: `update-function` y `publish-function`, sin salida. | Si falla `publish-function`: revisar el ETag. No reintentar en bucle. |
-| 10 | `▶ Verificación de la API`: `GET /tokens/<falso> → HTTP 200 {"ok": false, "motivo": "invalido"}` y `preflight → access-control-allow-origin: https://ork3d.com`. | `HTTP 403` o `Forbidden`: sección 11. Cualquier otra respuesta: parar. |
-| 11 | `▶ Retención de logs: 30 días`, sin salida. | `⚠`: correr el comando manual abajo. |
-| 12 | `▶ Listo. Próximos pasos` con la línea `Function URL: https://…`. | — |
+| 7 | `▶ Log group /aws/lambda/ork3d-resenas (retención 30 días)`: `create-log-group` (solo la primera vez) y `put-retention-policy`. Ocurre **antes** que la Lambda. | Cualquier error: parar. No seguir sin este paso. |
+| 8 | `▶ Lambda ork3d-resenas`: `create-function` (primera vez) y `wait function-active-v2` (30 s a 1 min). | — |
+| 9 | `▶ Concurrencia reservada (opcional)`: `put-function-concurrency`, o `Reserved concurrency omitida: límite de cuenta insuficiente.` | La omisión es válida (sección 3.2). Cualquier otro error: parar. |
+| 10 | `▶ Function URL`: `create-function-url-config` (primera vez) y dos `add-permission`, o `ya existe` para cada permiso. | Un `add-permission` con error: no reintentar a ciegas. Revisar con `get-policy` (sección 10). |
+| 11 | `▶ CloudFront Function ork3d-redirect-www`: `update-function` y `publish-function`, sin salida. | Si falla `publish-function`: revisar el ETag. No reintentar en bucle. |
+| 12 | `▶ Verificación de la API`: `GET /tokens/<falso> → HTTP 200 {"ok": false, "motivo": "invalido"}` y `OPTIONS /resenas → HTTP 204` con `access-control-allow-origin: https://ork3d.com`. | `HTTP 403` o `Forbidden`: falta un permiso de la Function URL (sección 11). Cualquier otra respuesta: parar. |
+| 13 | `▶ Listo. Próximos pasos` con la línea `Function URL: https://…`. | — |
 
-Comando manual de concurrencia, si el paso 7 avisó:
+Comando manual de concurrencia. Solo si la cuenta ya tiene margen (al menos 15 sin reservar) o después de aumentar el límite en Service Quotas:
 
 ```
 aws lambda put-function-concurrency --function-name ork3d-resenas \
   --reserved-concurrent-executions 5 --profile "$AWS_PROFILE"
 ```
 
-Comando manual de retención, si el paso 11 avisó:
+Si `put-retention-policy` falla con `ResourceNotFoundException`, el log group no existe. No debería pasar: el script lo crea
+antes de la Lambda. Si pasa, crearlo y fijar la retención a mano:
 
 ```
+aws logs create-log-group --log-group-name /aws/lambda/ork3d-resenas --profile "$AWS_PROFILE"
 aws logs put-retention-policy --log-group-name /aws/lambda/ork3d-resenas \
   --retention-in-days 30 --profile "$AWS_PROFILE"
 ```
@@ -436,8 +471,9 @@ aws iam get-role --role-name ork3d-resenas-lambda --profile "$AWS_PROFILE" \
   --query 'Role.{Name:RoleName,Arn:Arn}' --output json
 aws iam get-role-policy --role-name ork3d-resenas-lambda --policy-name resenas-bucket-privado \
   --profile "$AWS_PROFILE" --query PolicyDocument --output json | jq '.Statement[] | {Sid, Actions: .Action, Resources: .Resource}'
-#   esperado: 3 sentencias (LeerEstadoReseniasYFotos, EscribirClaimsResenasYFirmarFotos, LiberarClaimSiFallaLaEscritura)
-#   ningún Resource "*"; ningún s3:* ; ningún PutObject sobre tokens/
+#   esperado: 4 sentencias (LeerEstadoReseniasYFotos, EscribirClaimsResenasYFirmarFotos, LiberarClaimSiFallaLaEscritura,
+#   ListarBucketParaDistinguirAusentes)
+#   ningún Resource "*"; ningún s3:* ; ningún PutObject sobre tokens/; ListBucket solo sobre el ARN del bucket, sin prefijo
 aws iam list-attached-role-policies --role-name ork3d-resenas-lambda --profile "$AWS_PROFILE" --output text
 #   esperado: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 ```
@@ -452,12 +488,14 @@ aws lambda get-function-configuration --function-name ork3d-resenas --profile "$
   --query 'Environment.Variables' --output json
 #   esperado: solo RESENAS_BUCKET, ALLOWED_ORIGIN, GOOGLE_REVIEW_URL (sin secretos)
 aws lambda get-function-concurrency --function-name ork3d-resenas --profile "$AWS_PROFILE" --output json
-#   esperado: {"ReservedConcurrentExecutions": 5}
+#   esperado: {} si la concurrencia se omitió (sección 3.2); {"ReservedConcurrentExecutions": 5} si se configuró.
 aws lambda get-function-url-config --function-name ork3d-resenas --profile "$AWS_PROFILE" --output json
 #   esperado: AuthType NONE, y sin bloque Cors (o Cors vacío)
 aws lambda get-policy --function-name ork3d-resenas --profile "$AWS_PROFILE" --query Policy --output text \
   | jq '.Statement[] | {Sid, Action, Principal, Condition}'
-#   esperado: FunctionURLAllowPublicAccess, lambda:InvokeFunctionUrl, condición FunctionUrlAuthType NONE
+#   esperado: dos sentencias:
+#     FunctionURLAllowPublicAccess: lambda:InvokeFunctionUrl, condición FunctionUrlAuthType NONE
+#     FunctionURLAllowInvokeViaUrl: lambda:InvokeFunction, condición lambda:InvokedViaFunctionUrl = true
 ```
 
 ### CloudWatch Logs
@@ -511,22 +549,30 @@ API="https://<id>.lambda-url.us-east-1.on.aws"
 curl -s -w '\nHTTP %{http_code}\n' "$API/tokens/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 #   esperado: {"ok": false, "motivo": "invalido"} y HTTP 200
 curl -s -o /dev/null -D - -X OPTIONS -H "Origin: https://ork3d.com" \
-  -H "Access-Control-Request-Method: POST" "$API/resenas" | grep -i '^access-control'
-#   esperado: access-control-allow-origin: https://ork3d.com
+  -H "Access-Control-Request-Method: POST" "$API/resenas" | grep -i -E '^(HTTP|access-control)'
+#   esperado: HTTP/2 204 (o HTTP/1.1 204), access-control-allow-origin: https://ork3d.com,
 #             access-control-allow-methods: GET,POST,OPTIONS
 ```
 
-Si la primera consulta devuelve `HTTP 403` o `{"Message":"Forbidden"}`: la invocación pública no está permitida. La
-Function URL con `AuthType NONE` necesita el permiso `lambda:InvokeFunctionUrl` con principal `*`. El script ya lo
-agrega. Si aun así falla, la alternativa es agregar también `lambda:InvokeFunction` con principal `*`:
+Validado en la ejecución real (sección 17.2): el token falso responde `HTTP 200` con `invalido`, y el preflight responde
+`204` con `access-control-allow-origin`.
+
+Si el GET devuelve `HTTP 403` o `{"Message":"Forbidden"}`, falta uno de los dos permisos de invocación. Revisá el
+`get-policy` de la sección 10. Solo si falta alguno, agregarlo a mano (sin tocar los existentes):
 
 ```
-aws lambda add-permission --function-name ork3d-resenas --statement-id FunctionInvokePublicAccess \
-  --action lambda:InvokeFunction --principal "*" --profile "$AWS_PROFILE"
+# Permiso 1: invocar la URL con AuthType NONE
+aws lambda add-permission --function-name ork3d-resenas --statement-id FunctionURLAllowPublicAccess \
+  --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE --profile "$AWS_PROFILE"
+
+# Permiso 2: invocación que entra por la Function URL (sin este, 403)
+aws lambda add-permission --function-name ork3d-resenas --statement-id FunctionURLAllowInvokeViaUrl \
+  --action lambda:InvokeFunction --principal "*" --invoked-via-function-url --profile "$AWS_PROFILE"
 ```
 
-Ese permiso deja invocar la función con credenciales de cualquier cuenta AWS. La API sigue exigiendo un token válido
-para escribir. Es una decisión de seguridad: **no la apliques sin mi confirmación.**
+Los dos usan principal `*` porque la URL es pública (AuthType NONE). El segundo solo aplica a invocaciones que entran
+por la URL (`lambda:InvokedViaFunctionUrl = true`). La seguridad de escritura la da la API: token válido de un solo uso,
+validación del contenido y límites. **No agregar ningún permiso de invocación sin esa condición**, sin autorización explícita.
 
 ---
 
@@ -581,10 +627,10 @@ Solo la navegación a `/opinar/<token>` pasa por el DNS del sitio.
 
 ---
 
-## 13. Prueba de atomicidad IfNoneMatch (I). No ejecutar todavía
+## 13. Atomicidad con If-None-Match (I): validada en S3 real (13.1). 13.2 pendiente
 
 Objetivo: confirmar contra S3 real que dos claims concurrentes sobre el mismo token dan **un solo éxito**, y que
-se crea **una sola reseña**. Esta prueba crea datos reales en producción. Se ejecuta solo con autorización explícita.
+se crea **una sola reseña**. **13.1 quedó validada en S3 real.** **13.2 crea datos reales en producción**: se ejecuta solo con autorización explícita.
 
 ### Requisitos
 
@@ -593,6 +639,9 @@ se crea **una sola reseña**. Esta prueba crea datos reales en producción. Se e
 - Autorización explícita para crear datos de prueba (token `SMOKE-TEST-ORK3D`).
 
 ### 13.1 Primitiva S3 (sin reseñas): dos `put-object` con `--if-none-match`
+
+**Resultado real (S3 de producción):** dos `put-object` concurrentes con `--if-none-match '*'` sobre la misma clave dieron
+**un solo éxito**; el otro fue rechazado por la condición. Ver sección 17.2.
 
 Antes, comprobá que tu versión de AWS CLI soporta el parámetro:
 
@@ -625,7 +674,7 @@ Limpieza: con versionado activo, `delete-object` solo deja una marca de borrado.
 borrar_versiones_de_clave "$RESENAS_BUCKET" "$KEY"
 ```
 
-### 13.2 Prueba end-to-end con la API: un token, dos envíos simultáneos
+### 13.2 Prueba end-to-end con la API: un token, dos envíos simultáneos (pendiente de autorización)
 
 1. Crear el token de prueba con la CLI real (crea datos en producción):
 
@@ -720,7 +769,7 @@ Se ejecuta después del deploy del frontend. Es la parte del pedido original que
 
 - Bucket S3 privado `$RESENAS_BUCKET` (con sus versiones y marcas de borrado).
 - Rol IAM `ork3d-resenas-lambda`, con su política inline `resenas-bucket-privado` y la política administrada adjunta.
-- Lambda `ork3d-resenas`, con su concurrencia reservada, su Function URL y el permiso `FunctionURLAllowPublicAccess`.
+- Lambda `ork3d-resenas`, con su Function URL y sus dos permisos (`FunctionURLAllowPublicAccess` y `FunctionURLAllowInvokeViaUrl`). La concurrencia reservada existe solo si se configuró (sección 3.2).
 - Log group `/aws/lambda/ork3d-resenas`.
 
 **Recursos existentes que se modifican:**
@@ -880,8 +929,44 @@ excluye `resenas/`, `api/`, `admin/`, `dev/` y `docs/`, así que las reseñas pu
 - No merge a `main` ni deploy sin autorización explícita. El orden es: infraestructura, Function URL, `config.js` en un
   commit aparte, merge, deploy, smoke test.
 - No `DRY_RUN=0` sin haber leído el dry-run completo y completado la checklist.
+- No volver a ejecutar `infra/resenas-setup.sh` con `DRY_RUN=0` sin autorización explícita: la infraestructura ya existe.
 - No access keys en archivos, en comandos ni en el repo.
 - No pegar account IDs, distribution IDs ni URLs reales en el repo ni en issues públicos.
 - No cambiar `config.js` con una URL ficticia. Esperá la Function URL real.
 - No enlazar `/opiniones`, ni agregarla al sitemap, ni tocar la home en este despliegue.
 - No crear reseñas de prueba visibles públicamente. Si una prueba aprueba una reseña, la limpieza (15.5) es obligatoria.
+
+---
+
+## 17. Hallazgos del despliegue real
+
+Estos puntos salieron al crear la infraestructura en AWS desde la máquina del operador. Cada uno quedó corregido en el
+script, en las políticas, en los tests o en este runbook. El frontend no se desplegó y `config.js` no cambió.
+
+### 17.1 Hallazgos y correcciones
+
+| # | Hallazgo | Causa | Corrección en el repo | Dónde se verifica |
+| --- | --- | --- | --- | --- |
+| 1 | La Function URL respondía 403. | Solo existía `lambda:InvokeFunctionUrl`. Con AuthType NONE hace falta también `lambda:InvokeFunction` con `lambda:InvokedViaFunctionUrl = true`. | El script crea los dos permisos y los detecta por contenido de la política: es idempotente. | `infra/tests`: `test_script_declara_los_dos_permisos_de_function_url`, `test_modo_real_crea_los_dos_permisos_de_function_url`. Sección 11. |
+| 2 | Un token inexistente respondía 500 en lugar de `invalido`. | Sin `s3:ListBucket`, S3 responde `AccessDenied` a claves que no existen, en lugar de `NotFound`. La API lo trataba como error interno. | El rol suma `s3:ListBucket` sobre el ARN del bucket, sin prefijo. Un `AccessDenied` real sigue siendo 500. | `infra/tests`: `test_lambda_permisos_incluye_listbucket_solo_sobre_el_bucket_de_resenas`. `api/resenas`: `test_contrato_token_inexistente_responde_200_invalido`, `test_error_de_permiso_en_s3_no_se_disfraza_de_token_invalido`. |
+| 3 | `put-function-concurrency` con 5 fallaba. | La cuenta tenía 10 sin reservar. AWS exige que queden al menos 10 después de reservar. | Concurrencia opcional: se reserva solo con margen (sección 3.2). Si no hay margen, se informa y se sigue. | `infra/tests`: `test_concurrencia_sin_margen_no_aborta_ni_toca_la_funcion`, `test_concurrencia_con_margen_la_configura_solo_para_la_funcion`. |
+| 4 | `put-retention-policy` fallaba con `ResourceNotFoundException`. | Lambda crea el log group en su primera invocación. La retención se fijaba después de la verificación, cuando el grupo todavía no existía. | El log group se crea **antes** de la Lambda, con retención de 30 días. | `infra/tests`: `test_log_group_se_crea_antes_de_la_lambda_con_retencion_30`, `test_log_group_existente_no_se_recrea`. |
+
+### 17.2 Comportamiento validado en AWS real
+
+| Prueba | Resultado |
+| --- | --- |
+| `GET /tokens/<token inexistente>` (sección 11) | `HTTP 200` con `{"ok": false, "motivo": "invalido"}`. No es 404 ni 500. |
+| `OPTIONS /resenas` con `Origin: https://ork3d.com` | `HTTP 204` con `access-control-allow-origin: https://ork3d.com`. CORS lo responde la Lambda: la Function URL no tiene CORS propio. |
+| Dos `put-object` con `--if-none-match '*'` sobre la misma clave (13.1) | **Un solo éxito.** El otro fue rechazado por la condición. Atomicidad confirmada. |
+
+### 17.3 Pendiente
+
+- **13.2**: prueba end-to-end de atomicidad con la API. Crea datos de producción: requiere autorización.
+- **Sección 14**: smoke test de cliente y moderación. Va después del deploy del frontend.
+- **`config.js`** con la Function URL real: commit aparte, después de autorizar el deploy del frontend.
+- **Sección 12**: si `ork3d.com` pasa por el proxy de Cloudflare, no está verificado.
+- **Safari/iOS**: confirmar que el canvas no agrega metadatos.
+- **Límite por IP**: no implementado (`docs/resenas/README.md`, pendientes).
+- **Export**: relee todas las reseñas. Revisar antes de ~1.000 reseñas.
+- **Script de infraestructura en macOS y bash 3.2**: no probado.
