@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BucketPrivadoDeResenas",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::__RESENAS_BUCKET__",
+        "arn:aws:s3:::__RESENAS_BUCKET__/*"
+      ]
+    },
+    {
+      "Sid": "PublicarResenasEnElSitio",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::__SITE_BUCKET__/resenas/*"
+    },
+    {
+      "Sid": "ListarSoloResenasDelSitio",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__SITE_BUCKET__",
+      "Condition": { "StringLike": { "s3:prefix": ["resenas/*"] } }
+    },
+    {
+      "Sid": "InvalidarCacheDelSitio",
+      "Effect": "Allow",
+      "Action": "cloudfront:CreateInvalidation",
+      "Resource": "arn:aws:cloudfront::__ACCOUNT_ID__:distribution/__DISTRIBUTION_ID__"
+    }
+  ]
+}

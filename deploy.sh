@@ -17,6 +17,8 @@ fi
 
 echo "▶ Sync a s3://${BUCKET} ..."
 
+# IMPORTANTE: resenas/ lo escribe el CLI de moderación (publicas.json y fotos aprobadas).
+# Está excluido del sync y del --delete: si se quita la exclusión, cada deploy borra las reseñas publicadas.
 # Assets con cache larga (hash en path no, así que mantenemos cache moderado)
 aws s3 sync . "s3://${BUCKET}" \
   --delete \
@@ -30,6 +32,11 @@ aws s3 sync . "s3://${BUCKET}" \
   --exclude "claude.md" \
   --exclude "*.sh" \
   --exclude "*.md" \
+  --exclude "api/*" \
+  --exclude "admin/*" \
+  --exclude "dev/*" \
+  --exclude "docs/*" \
+  --exclude "resenas/*" \
   --cache-control "public, max-age=300" \
   --metadata-directive REPLACE
 
@@ -73,6 +80,16 @@ aws s3 cp assets/ "s3://${BUCKET}/assets/" \
   --exclude "*" --include "*.webp" \
   --content-type "image/webp" \
   --cache-control "public, max-age=300, must-revalidate" \
+  --metadata-directive REPLACE
+
+aws s3 cp opinar.html "s3://${BUCKET}/opinar.html" \
+  --cache-control "public, max-age=60, must-revalidate" \
+  --content-type "text/html; charset=utf-8" \
+  --metadata-directive REPLACE
+
+aws s3 cp opiniones.html "s3://${BUCKET}/opiniones.html" \
+  --cache-control "public, max-age=60, must-revalidate" \
+  --content-type "text/html; charset=utf-8" \
   --metadata-directive REPLACE
 
 aws s3 cp config.js "s3://${BUCKET}/config.js" \

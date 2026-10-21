@@ -8,6 +8,8 @@ on:
       - 'torneos.html'
       - 'regalos-empresariales-fin-de-ano.html'
       - 'error.html'
+      - 'opinar.html'
+      - 'opiniones.html'
       - 'config.js'
       - 'sitemap.xml'
       - 'robots.txt'

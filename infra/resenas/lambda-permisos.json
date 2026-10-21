@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LeerEstadoReseniasYFotos",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::__RESENAS_BUCKET__/tokens/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/claims/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/resenas/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/pendientes/*"
+      ]
+    },
+    {
+      "Sid": "EscribirClaimsResenasYFirmarFotos",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::__RESENAS_BUCKET__/claims/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/resenas/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/pendientes/*"
+      ]
+    },
+    {
+      "Sid": "LiberarClaimSiFallaLaEscritura",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::__RESENAS_BUCKET__/claims/*"
+    }
+  ]
+}

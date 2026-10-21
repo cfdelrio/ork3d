@@ -1,0 +1,17 @@
+{
+  "Rules": [
+    {
+      "ID": "pendientes-vencen-a-los-2-dias",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "pendientes/" },
+      "Expiration": { "Days": 2 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    },
+    {
+      "ID": "versiones-anteriores-30-dias",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+    }
+  ]
+}

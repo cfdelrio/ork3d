@@ -1,4 +1,8 @@
 User-agent: *
+Disallow: /api/
 Allow: /
+
+# /opinar/<token> no va en robots.txt: esa página lleva <meta name="robots" content="noindex">,
+# y un Disallow impediría a los crawlers leer ese meta.
 
 Sitemap: https://ork3d.com/sitemap.xml
