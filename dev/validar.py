@@ -69,7 +69,7 @@ def validar_shell():
 
 def validar_python():
     archivos = glob.glob(os.path.join(ROOT, 'api/resenas/*.py')) + glob.glob(os.path.join(ROOT, 'dev/*.py')) + \
-        glob.glob(os.path.join(ROOT, 'admin/tests/*.py'))
+        glob.glob(os.path.join(ROOT, 'admin/tests/*.py')) + glob.glob(os.path.join(ROOT, 'infra/tests/*.py'))
     for ruta in archivos:
         r = correr([sys.executable, '-m', 'py_compile', ruta])
         comprobar(f'Python: compila {os.path.relpath(ruta, ROOT)}', r.returncode == 0, r.stderr.strip())

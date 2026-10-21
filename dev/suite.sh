@@ -28,11 +28,12 @@ capa() {  # capa NOMBRE COMANDO...
 }
 
 capa "API unitaria y contrato CLI/API" python3 -m unittest discover -s api/resenas -v
+capa "Infra: script y políticas (sin AWS)" python3 -m unittest discover -s infra/tests -v
 capa "CLI de moderación (admin/tests)" bash admin/tests/run_tests.sh
 capa "Browser E2E (Chromium)" node dev/e2e/opinar.e2e.js
 capa "Validaciones HTML/JS/shell/JSON/IAM" python3 dev/validar.py
 
-rm -rf api/resenas/__pycache__ dev/__pycache__ admin/tests/__pycache__
+rm -rf api/resenas/__pycache__ dev/__pycache__ admin/tests/__pycache__ infra/tests/__pycache__
 
 echo
 echo "════ Resumen ════"
