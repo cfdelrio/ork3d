@@ -25,8 +25,26 @@
 
   var MSG_RED = 'No pudimos conectar con el panel. Revisá tu conexión y probá de nuevo.';
 
+  // SHA-256 hex de los bytes UTF-8 de un texto, con Web Crypto. Web Crypto solo existe en contextos
+  // seguros (HTTPS o localhost). Si falta, la promesa rechaza y el POST NO sale: sin hash OAC lo rechaza.
+  function sha256Hex(texto) {
+    return new Promise(function (resolver, rechazar) {
+      if (!window.crypto || !window.crypto.subtle || typeof TextEncoder === 'undefined') {
+        rechazar(new Error('sin-web-crypto'));
+        return;
+      }
+      window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto)).then(function (digest) {
+        resolver(Array.prototype.map.call(new Uint8Array(digest), function (b) {
+          return ('0' + b.toString(16)).slice(-2);
+        }).join(''));
+      }, rechazar);
+    });
+  }
+
   // Llama a la API admin (siempre mismo origen). Resuelve {status, datos}.
-  // Solo rechaza ante error de red. Los GET no llevan cabeceras de mutación.
+  // Solo rechaza ante error de red o si un POST no se puede firmar. Los GET no llevan cabeceras de mutación.
+  // Regla para la Function URL detrás de OAC: el body de un POST se serializa UNA sola vez; ese mismo string
+  // se hashea (SHA-256 sobre sus bytes UTF-8) y se envía como body. x-amz-content-sha256 lleva ese hash.
   function llamar(metodo, ruta, cuerpo) {
     var cabeceras = { Accept: 'application/json' };
     var opciones = {
@@ -35,23 +53,31 @@
       cache: 'no-store',
       headers: cabeceras
     };
-    if (metodo !== 'GET') {
-      cabeceras['Content-Type'] = 'application/json';
-      cabeceras['X-Admin-Request'] = '1';
-      opciones.body = JSON.stringify(cuerpo || {});
-    }
-    return fetch(BASE + ruta, opciones).then(function (respuesta) {
-      return respuesta.text().then(function (texto) {
-        var datos = {};
-        if (texto) {
-          try {
-            datos = JSON.parse(texto);
-          } catch (error) {
-            datos = {};
+    function enviar() {
+      return fetch(BASE + ruta, opciones).then(function (respuesta) {
+        return respuesta.text().then(function (texto) {
+          var datos = {};
+          if (texto) {
+            try {
+              datos = JSON.parse(texto);
+            } catch (error) {
+              datos = {};
+            }
           }
-        }
-        return { status: respuesta.status, datos: datos };
+          return { status: respuesta.status, datos: datos };
+        });
       });
+    }
+    if (metodo === 'GET') {
+      return enviar();
+    }
+    var cuerpoTexto = JSON.stringify(cuerpo || {});
+    cabeceras['Content-Type'] = 'application/json';
+    cabeceras['X-Admin-Request'] = '1';
+    opciones.body = cuerpoTexto;
+    return sha256Hex(cuerpoTexto).then(function (hash) {
+      cabeceras['x-amz-content-sha256'] = hash;
+      return enviar();
     });
   }
 

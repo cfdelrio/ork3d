@@ -22,6 +22,7 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -48,6 +49,14 @@ let correoAcceso = null;   // destinatario del correo de acceso (para revisar lo
 const tokensInvitacion = []; // tokens de las invitaciones creadas (para revisar logs)
 let logServidor = '';      // salida del servidor, para revisar que no imprima datos sensibles
 const casos = [];
+// POST del panel que tienen que llevar x-amz-content-sha256 con el hash del body (OAC; ver V2-ADMIN.md §5).
+const RUTAS_POST_REQUERIDAS = [
+  '/sesion/solicitar', '/sesion/confirmar', '/sesion/cerrar', '/invitaciones',
+  '/resenas/{id}/aprobar', '/resenas/{id}/rechazar', '/resenas/{id}/ocultar', '/resenas/{id}/restaurar',
+  '/resenas/{id}/reenviar-aviso', '/exportar'
+];
+// Todos los pedidos al API admin de todos los casos: el caso final verifica cada POST.
+const pedidosApi = [];
 
 function caso(nombre, fn) { casos.push({ nombre, fn }); }
 
@@ -98,11 +107,19 @@ async function abrirPagina(browser, { ancho = 390, conSesion = false } = {}) {
   page.on('request', (r) => {
     if (!r.url().startsWith(BASE)) s.externos.push(r.url());
     if (r.url().startsWith(`${BASE}/admin/api/`)) {
-      const pedido = { metodo: r.method(), ruta: r.url().slice(`${BASE}/admin/api`.length), cabeceras: {}, cuerpo: r.postData() };
+      // cuerpoBytes son los bytes exactos que sale por la red (sin reserializar): el hash se recalcula sobre ellos.
+      const pedido = {
+        metodo: r.method(),
+        ruta: r.url().slice(`${BASE}/admin/api`.length),
+        cabeceras: {},
+        cuerpo: r.postData(),
+        cuerpoBytes: r.postDataBuffer()
+      };
       // Chromium agrega Origin después del evento 'request': headers() no lo trae y allHeaders() sí.
       // Quien necesite las cabeceras espera pedido.listo.
       pedido.listo = r.allHeaders().then((h) => { pedido.cabeceras = h; }).catch(() => {});
       s.api.push(pedido);
+      pedidosApi.push(pedido);
     }
   });
   return s;
@@ -110,6 +127,20 @@ async function abrirPagina(browser, { ancho = 390, conSesion = false } = {}) {
 
 function pedidosA(s, metodo, ruta) {
   return s.api.filter((p) => p.metodo === metodo && p.ruta.startsWith(ruta));
+}
+
+// OAC exige x-amz-content-sha256 = SHA-256 hex exacto del body. Se recalcula sobre los bytes capturados
+// y se compara con la cabecera que salió por la red. No basta con que la cabecera exista.
+async function verificarHashDelBody(pedido) {
+  esperar(pedido, 'debe haber un POST para verificar su hash');
+  await pedido.listo;
+  esperar(pedido.cuerpoBytes && pedido.cuerpoBytes.length > 0,
+    `POST ${pedido.ruta} sin body capturado: no se puede verificar su hash`);
+  const esperado = crypto.createHash('sha256').update(pedido.cuerpoBytes).digest('hex');
+  const recibido = pedido.cabeceras['x-amz-content-sha256'];
+  esperar(recibido !== undefined, `POST ${pedido.ruta} sin cabecera x-amz-content-sha256`);
+  esperar(recibido === esperado,
+    `POST ${pedido.ruta}: x-amz-content-sha256 ${recibido} no coincide con el SHA-256 del body (${esperado})`);
 }
 
 function sinErroresNiExternos(s, permitidos = []) {
@@ -431,6 +462,7 @@ caso('invitación: crea el link, lo copia y no lo guarda en el navegador', async
     esperar(post.cabeceras['x-admin-request'] === '1', 'falta la cabecera X-Admin-Request');
     esperar(post.cabeceras['content-type'] === 'application/json', 'el cuerpo debe ser application/json');
     esperar(post.cabeceras.origin === BASE, `Origin: ${post.cabeceras.origin}`);
+    await verificarHashDelBody(post);
     const cuerpo = JSON.parse(post.cuerpo);
     esperar(cuerpo.order_ref === 'ORK-E2E-0001' && cuerpo.dias === 15, `cuerpo de la invitación: ${post.cuerpo}`);
 
@@ -603,6 +635,7 @@ caso('moderación: aprobar y ocultar piden confirmación; restaurar no; el aviso
     await post.listo;
     esperar(post && post.cabeceras.origin === BASE && post.cabeceras['x-admin-request'] === '1',
       'la acción lleva Origin y X-Admin-Request');
+    await verificarHashDelBody(post);
 
     await botonAccion('ocultar').click();
     await p.click('#dialogo-confirmar');
@@ -843,6 +876,21 @@ caso('sesión: cerrar sesión vuelve al acceso y la sesión anterior deja de ser
     sinErroresNiExternos(s);
   } finally {
     await s.ctx.close();
+  }
+});
+
+caso('seguridad: cada POST al API admin lleva el SHA-256 exacto de su body y todas las rutas requeridas se ejercitaron', async () => {
+  const posts = pedidosApi.filter((p) => p.metodo === 'POST');
+  esperar(posts.length > 0, 'no hubo POST al API admin: el caso no puede verificar nada');
+  for (const p of posts) {
+    await verificarHashDelBody(p);
+    esperar(p.cabeceras['content-type'] === 'application/json', `POST ${p.ruta}: Content-Type ${p.cabeceras['content-type']}`);
+    esperar(p.cabeceras['x-admin-request'] === '1', `POST ${p.ruta}: falta X-Admin-Request`);
+    esperar(p.cabeceras.origin === BASE, `POST ${p.ruta}: Origin ${p.cabeceras.origin}`);
+  }
+  const vistas = new Set(posts.map((p) => p.ruta.replace(/^\/resenas\/[a-f0-9]{32}/, '/resenas/{id}')));
+  for (const requerida of RUTAS_POST_REQUERIDAS) {
+    esperar(vistas.has(requerida), `falta un POST a ${requerida} en la verificación del hash`);
   }
 });
 

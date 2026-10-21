@@ -203,6 +203,22 @@ class FrontendAdminTest(unittest.TestCase):
             for prohibido in [PEDIDO, CONTACTO, FEEDBACK, 'Muy buena compra']:
                 self.assertNotIn(prohibido, fuente, f'{ruta} trae datos estáticos')
 
+    def test_fetch_solo_en_el_helper_compartido_y_los_post_firman_el_body(self):
+        # Todo el tráfico del panel pasa por llamar() de admin-comun.js: ahí se serializa el body una vez,
+        # se calcula su SHA-256 (x-amz-content-sha256) y se envía ese mismo string.
+        js = self.archivos_js()
+        comun = js['assets/js/admin-comun.js']
+        self.assertEqual(len(re.findall(r'\bfetch\(', comun)), 1)
+        self.assertEqual(len(re.findall(r'JSON\.stringify\(', comun)), 1, 'el body se serializa una sola vez')
+        self.assertIn("digest('SHA-256'", comun)
+        self.assertIn("'x-amz-content-sha256'", comun)
+        self.assertIn('opciones.body = cuerpoTexto;', comun)
+        for ruta, fuente in js.items():
+            if ruta == 'assets/js/admin-comun.js':
+                continue
+            self.assertIsNone(re.search(r'\bfetch\(', fuente), f'{ruta} hace fetch por fuera del helper')
+            self.assertIsNone(re.search(r'JSON\.stringify\(', fuente), f'{ruta} serializa un body por fuera del helper')
+
     def test_js_admin_no_construye_urls_absolutas_fuera_del_sitio(self):
         for ruta, fuente in self.archivos_js().items():
             for url in re.findall(r"""['"`]https?://[^'"`\s]+""", fuente):

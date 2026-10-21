@@ -19,6 +19,7 @@ Nada de esto se despliega: dev/ está excluido del deploy.
 import base64
 import datetime as dt
 import email.policy
+import hashlib
 import json
 import mimetypes
 import os
@@ -191,6 +192,10 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── API admin V2 (el mismo handler que la Lambda admin) ──────────────
     def _admin_api(self, metodo, ruta, consulta, cuerpo):
+        # Emulación de OAC: en AWS, un request con body sin x-amz-content-sha256 igual al SHA-256 del body
+        # no llega a la Lambda. Acá se rechaza igual, antes de la API, para que el E2E lo detecte.
+        if metodo in ('POST', 'PUT', 'PATCH') and not self._payload_firmado(cuerpo):
+            return self._texto(403, 'Forbidden: falta x-amz-content-sha256 o no coincide con el body (emulación de OAC)')
         evento = {
             'requestContext': {'http': {'method': metodo}},
             'rawPath': ruta,
@@ -208,6 +213,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(datos)))
         self.end_headers()
         self.wfile.write(datos)
+
+    def _payload_firmado(self, cuerpo):
+        recibido = self.headers.get('x-amz-content-sha256')
+        return recibido is not None and recibido == hashlib.sha256(cuerpo).hexdigest()
 
     # ── Subida firmada a S3 (multipart del navegador) ────────────────────
     def _s3_fake(self, ruta, cuerpo):
