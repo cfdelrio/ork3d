@@ -92,12 +92,18 @@ existe() {
 
 # Reemplaza los placeholders de una plantilla de infra/resenas/ y deja el resultado en $WORK.
 render() {
+  if [[ "$1" == "lambda-permisos.json" && ( -z "${RESENAS_FROM_EMAIL:-}" || -z "${RESENAS_ADMIN_EMAIL:-}" ) ]]; then
+    echo "  ⚠ RESENAS_FROM_EMAIL o RESENAS_ADMIN_EMAIL vacíos: la política de la Lambda pública queda sin correo (requerido desde la V2)."
+  fi
   sed \
     -e "s|__RESENAS_BUCKET__|${RESENAS_BUCKET}|g" \
     -e "s|__SITE_BUCKET__|${BUCKET}|g" \
     -e "s|__ALLOWED_ORIGIN__|${ALLOWED_ORIGIN}|g" \
     -e "s|__ACCOUNT_ID__|${ACCOUNT_ID}|g" \
     -e "s|__DISTRIBUTION_ID__|${DISTRIBUTION_ID}|g" \
+    -e "s|__AWS_REGION__|${REGION}|g" \
+    -e "s|__RESENAS_FROM_EMAIL__|${RESENAS_FROM_EMAIL:-}|g" \
+    -e "s|__RESENAS_ADMIN_EMAIL__|${RESENAS_ADMIN_EMAIL:-}|g" \
     "infra/resenas/$1" > "$WORK/$1"
 }
 
@@ -252,6 +258,13 @@ aws_run logs put-retention-policy --log-group-name "$LOG_GROUP" --retention-in-d
 # ── 4. Lambda ──────────────────────────────────────────────────────────────
 log "Lambda ${FUNCTION}"
 (cd api/resenas && zip -q -j "${WORK}/resenas.zip" app.py)
+# El núcleo V2 (tokens, correo, export, sesiones) va con la Lambda pública: app.py lo importa.
+# Sin el núcleo la Lambda no arranca, así que su ausencia detiene el script antes de tocar AWS.
+if [[ ! -d api/resenas/nucleo ]]; then
+  echo "  ✗ falta api/resenas/nucleo/: la Lambda pública no arranca sin el núcleo V2." >&2
+  exit 1
+fi
+(cd api/resenas && zip -q -r "${WORK}/resenas.zip" nucleo -x '*/__pycache__/*')
 jq -n --arg b "$RESENAS_BUCKET" --arg o "$ALLOWED_ORIGIN" --arg g "$GOOGLE_REVIEW_URL" \
   '{Variables: {RESENAS_BUCKET: $b, ALLOWED_ORIGIN: $o, GOOGLE_REVIEW_URL: $g}}' > "${WORK}/env.json"
 if ! existe aws lambda get-function --function-name "$FUNCTION"; then

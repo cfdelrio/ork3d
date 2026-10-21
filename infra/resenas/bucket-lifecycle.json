@@ -8,6 +8,12 @@
       "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
     },
     {
+      "ID": "admin-vence-a-los-2-dias",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "admin/" },
+      "Expiration": { "Days": 2 }
+    },
+    {
       "ID": "versiones-anteriores-30-dias",
       "Status": "Enabled",
       "Filter": { "Prefix": "" },

@@ -114,6 +114,9 @@ class Repo:
             os.makedirs(os.path.dirname(destino), exist_ok=True)
             shutil.copy(os.path.join(ORIGEN, rel), destino)
         shutil.copytree(os.path.join(ORIGEN, 'infra', 'resenas'), os.path.join(self.dir, 'infra', 'resenas'))
+        # El script empaqueta el núcleo V2 con la Lambda pública y se detiene si falta: la copia lo incluye.
+        shutil.copytree(os.path.join(ORIGEN, 'api', 'resenas', 'nucleo'), os.path.join(self.dir, 'api', 'resenas', 'nucleo'),
+                        ignore=shutil.ignore_patterns('__pycache__'))
         self.bin = os.path.join(self.dir, 'bin')
         os.makedirs(self.bin)
         aws = os.path.join(self.bin, 'aws')

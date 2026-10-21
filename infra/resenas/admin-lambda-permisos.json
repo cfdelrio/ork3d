@@ -1,0 +1,79 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BucketPrivadoLecturaYEscrituraAdmin",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::__RESENAS_BUCKET__/tokens/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/resenas/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/notificaciones/*",
+        "arn:aws:s3:::__RESENAS_BUCKET__/admin/*"
+      ]
+    },
+    {
+      "Sid": "BucketPrivadoBorrarSoloEstadoAdmin",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::__RESENAS_BUCKET__/admin/*"
+    },
+    {
+      "Sid": "BucketPrivadoLecturaFotosPendientes",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::__RESENAS_BUCKET__/pendientes/*"
+    },
+    {
+      "Sid": "ListarBucketPrivadoParaDistinguirAusentes",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__RESENAS_BUCKET__"
+    },
+    {
+      "Sid": "PublicarResenasEnElSitio",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::__SITE_BUCKET__/resenas/*"
+    },
+    {
+      "Sid": "ListarSoloResenasDelSitio",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__SITE_BUCKET__",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "resenas/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "InvalidarCacheDelSitio",
+      "Effect": "Allow",
+      "Action": "cloudfront:CreateInvalidation",
+      "Resource": "arn:aws:cloudfront::__ACCOUNT_ID__:distribution/__DISTRIBUTION_ID__"
+    },
+    {
+      "Sid": "EnviarCorreoSoloEntreDireccionesConfiguradas",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": "arn:aws:ses:__AWS_REGION__:__ACCOUNT_ID__:identity/__RESENAS_FROM_EMAIL__",
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "__RESENAS_FROM_EMAIL__"
+        },
+        "ForAllValues:StringEquals": {
+          "ses:Recipients": "__RESENAS_ADMIN_EMAIL__"
+        }
+      }
+    }
+  ]
+}

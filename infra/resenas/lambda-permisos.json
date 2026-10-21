@@ -33,6 +33,26 @@
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::__RESENAS_BUCKET__"
+    },
+    {
+      "Sid": "GuardarAvisosDeNotificacion",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::__RESENAS_BUCKET__/notificaciones/*"
+    },
+    {
+      "Sid": "NotificarNuevaResenaAlModerador",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": "arn:aws:ses:__AWS_REGION__:__ACCOUNT_ID__:identity/__RESENAS_FROM_EMAIL__",
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "__RESENAS_FROM_EMAIL__"
+        },
+        "ForAllValues:StringEquals": {
+          "ses:Recipients": "__RESENAS_ADMIN_EMAIL__"
+        }
+      }
     }
   ]
 }

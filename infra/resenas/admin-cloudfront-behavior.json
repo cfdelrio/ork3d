@@ -1,0 +1,44 @@
+{
+  "_estado": "PLAN. No aplicar en esta etapa: requiere aprobación explícita y verificar OAC + Function URL AWS_IAM en la cuenta.",
+  "origen": {
+    "Id": "resenas-admin-lambda",
+    "DomainName": "__ADMIN_FUNCTION_URL_HOST__",
+    "OriginAccessControlId": "__OAC_ID__",
+    "CustomOriginConfig": {
+      "HTTPPort": 80,
+      "HTTPSPort": 443,
+      "OriginProtocolPolicy": "https-only",
+      "OriginSslProtocols": {
+        "Quantity": 1,
+        "Items": ["TLSv1.2"]
+      }
+    }
+  },
+  "behavior": {
+    "PathPattern": "/admin/api/*",
+    "TargetOriginId": "resenas-admin-lambda",
+    "ViewerProtocolPolicy": "https-only",
+    "AllowedMethods": {
+      "Quantity": 7,
+      "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+      "CachedMethods": {
+        "Quantity": 2,
+        "Items": ["GET", "HEAD"]
+      }
+    },
+    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+    "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+    "Compress": false,
+    "FunctionAssociations": {
+      "Quantity": 0,
+      "Items": []
+    }
+  },
+  "notas": [
+    "CachePolicyId 4135ea2d-... es CachingDisabled y OriginRequestPolicyId b689b0a8-... es AllViewerExceptHostHeader. Son IDs de políticas administradas de CloudFront: verificarlos en la cuenta antes del deploy.",
+    "El origen es la Function URL de la Lambda admin (host sin https://). No es la Function URL pública de ork3d-resenas.",
+    "FunctionAssociations vacío: ninguna función viewer-request sobre /admin/api/*. ork3d-redirect-www solo va en el default behavior.",
+    "Antes del deploy: validar OAC con Function URL AWS_IAM, incluido POST con firma de payload, y que las cookies llegan a la Lambda.",
+    "Este archivo es un plan. El bloque behavior va en CacheBehaviors y el bloque origen en Origins.Items de la distribución; no se pasa tal cual a AWS."
+  ]
+}
