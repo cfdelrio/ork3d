@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#191919" />
+<!-- Panel privado: no indexar, no filtrar la URL por el Referer y sin scripts inline ni terceros. -->
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'" />
+
+<title>Reseñas · Panel ORK3D</title>
+
+<link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg" />
+<link rel="stylesheet" href="/assets/css/admin.css?v=1" />
+<script src="/assets/js/admin-comun.js?v=1" defer></script>
+<script src="/assets/js/admin-panel.js?v=1" defer></script>
+</head>
+<body class="adm">
+
+<a class="adm__saltar" href="#principal">Ir al contenido</a>
+
+<header class="adm__cab">
+  <div class="adm__cab-inner">
+    <p class="adm__marca">ORK3D <span class="adm__marca-sub">Reseñas</span></p>
+    <button type="button" class="btn btn--secundario btn--compacto" id="cerrar-sesion" hidden>Cerrar sesión</button>
+  </div>
+</header>
+
+<main id="principal" class="adm__main" tabindex="-1">
+
+  <p class="adm__aviso" id="aviso-global" role="status" aria-live="polite" hidden></p>
+
+  <!-- Sin sesión: solo el acceso. No hay datos en esta sección. -->
+  <section class="adm__seccion adm__seccion--centro" id="seccion-acceso" aria-labelledby="titulo-acceso" hidden>
+    <h1 class="adm__titulo" id="titulo-acceso">Iniciar acceso</h1>
+    <p class="adm__texto">El panel es privado. Te enviamos un enlace de acceso al correo del moderador. El enlace vence en 10 minutos y sirve una sola vez.</p>
+    <button type="button" class="btn btn--primario" id="pedir-acceso">Enviarme el enlace de acceso</button>
+    <p class="adm__aviso" id="aviso-acceso" role="status" aria-live="polite" hidden></p>
+  </section>
+
+  <!-- Panel: crear solicitud y bandeja -->
+  <section class="adm__seccion" id="seccion-panel" aria-labelledby="titulo-panel" hidden>
+    <h1 class="adm__titulo" id="titulo-panel">Reseñas</h1>
+
+    <div class="adm__grid">
+
+      <section class="adm__bloque" aria-labelledby="titulo-crear">
+        <h2 class="adm__subtitulo" id="titulo-crear">Crear solicitud</h2>
+        <form id="form-invitacion" novalidate>
+
+          <div class="campo">
+            <label for="campo-pedido">Pedido</label>
+            <input id="campo-pedido" name="order_ref" type="text" maxlength="80" autocomplete="off" aria-describedby="err-pedido" />
+            <p class="campo__error" id="err-pedido" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label for="campo-producto">Producto (slug)</label>
+            <input id="campo-producto" name="product_slug" type="text" maxlength="40" autocomplete="off" aria-describedby="ayuda-producto err-producto" />
+            <p class="campo__ayuda" id="ayuda-producto">Minúsculas, números y guiones. Por ejemplo: trofeo-personalizado</p>
+            <p class="campo__error" id="err-producto" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label for="campo-etiqueta">Nombre del producto</label>
+            <input id="campo-etiqueta" name="product_label" type="text" maxlength="80" autocomplete="off" aria-describedby="err-etiqueta" />
+            <p class="campo__error" id="err-etiqueta" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label for="campo-categoria">Categoría (slug)</label>
+            <input id="campo-categoria" name="category" type="text" maxlength="40" autocomplete="off" list="categorias-sugeridas" aria-describedby="err-categoria" />
+            <datalist id="categorias-sugeridas">
+              <option value="torneos"></option>
+              <option value="regalos"></option>
+              <option value="personalizados"></option>
+            </datalist>
+            <p class="campo__error" id="err-categoria" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label for="campo-dias">Vigencia (días)</label>
+            <input id="campo-dias" name="dias" type="number" min="1" max="365" step="1" value="15" aria-describedby="err-dias" />
+            <p class="campo__error" id="err-dias" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label for="campo-mensaje">Mensaje para copiar o compartir (opcional)</label>
+            <textarea id="campo-mensaje" rows="3" maxlength="400" aria-describedby="ayuda-mensaje"></textarea>
+            <p class="campo__ayuda" id="ayuda-mensaje">Escribí {link} donde va el enlace. Si no lo ponés, se agrega al final. Este texto no se guarda.</p>
+          </div>
+
+          <p class="campo__error adm__error-general" id="err-general" role="alert" hidden></p>
+
+          <button type="submit" class="btn btn--primario" id="crear-link">Crear link de reseña</button>
+        </form>
+
+        <div class="resultado" id="resultado" tabindex="-1" hidden>
+          <p class="resultado__titulo">Link listo. Copialo ahora: se muestra una sola vez.</p>
+          <p class="resultado__vence" id="resultado-vence"></p>
+          <label for="resultado-enlace">Link de reseña</label>
+          <input id="resultado-enlace" class="resultado__enlace" type="text" readonly />
+          <div class="resultado__acciones">
+            <button type="button" class="btn btn--primario" id="copiar-enlace">Copiar link</button>
+            <button type="button" class="btn btn--secundario" id="compartir-enlace" hidden>Compartir</button>
+          </div>
+          <p class="adm__aviso" id="aviso-resultado" role="status" aria-live="polite" hidden></p>
+        </div>
+      </section>
+
+      <section class="adm__bloque" aria-labelledby="titulo-bandeja">
+        <h2 class="adm__subtitulo" id="titulo-bandeja">Bandeja</h2>
+
+        <div class="tabs" role="tablist" aria-label="Filtrar reseñas por estado" id="tabs">
+          <button type="button" role="tab" id="tab-pending" data-estado="pending" aria-selected="true" aria-controls="lista-resenas" tabindex="0">Pendientes</button>
+          <button type="button" role="tab" id="tab-approved" data-estado="approved" aria-selected="false" aria-controls="lista-resenas" tabindex="-1">Aprobadas</button>
+          <button type="button" role="tab" id="tab-rejected" data-estado="rejected" aria-selected="false" aria-controls="lista-resenas" tabindex="-1">Rechazadas</button>
+          <button type="button" role="tab" id="tab-hidden" data-estado="hidden" aria-selected="false" aria-controls="lista-resenas" tabindex="-1">Ocultas</button>
+          <button type="button" role="tab" id="tab-all" data-estado="all" aria-selected="false" aria-controls="lista-resenas" tabindex="-1">Todas</button>
+        </div>
+
+        <div id="lista-resenas" role="tabpanel" aria-labelledby="tab-pending" tabindex="-1">
+          <p class="adm__aviso" id="aviso-bandeja" role="status" aria-live="polite" hidden></p>
+          <button type="button" class="btn btn--secundario" id="reintentar-bandeja" hidden>Reintentar</button>
+          <ul class="lista" id="lista" aria-live="off"></ul>
+        </div>
+      </section>
+
+    </div>
+  </section>
+
+  <!-- Detalle: /admin/resenas/<id>. El contenido lo arma admin-panel.js con textContent. -->
+  <section class="adm__seccion" id="seccion-detalle" aria-labelledby="titulo-detalle" hidden>
+    <p><a class="adm__volver" href="/admin/resenas">Volver a la bandeja</a></p>
+    <h1 class="adm__titulo" id="titulo-detalle" tabindex="-1">Reseña</h1>
+    <p class="adm__aviso" id="aviso-detalle" role="status" aria-live="polite" hidden></p>
+    <button type="button" class="btn btn--secundario" id="regenerar-export" hidden>Regenerar export</button>
+    <article class="detalle" id="detalle"></article>
+    <div class="acciones" id="acciones-detalle"></div>
+  </section>
+
+</main>
+
+<dialog class="dialogo" id="dialogo" aria-labelledby="dialogo-titulo" aria-describedby="dialogo-texto">
+  <div class="dialogo__cuerpo">
+    <h2 class="dialogo__titulo" id="dialogo-titulo"></h2>
+    <p class="dialogo__texto" id="dialogo-texto"></p>
+    <div class="dialogo__acciones">
+      <button type="button" class="btn btn--secundario" id="dialogo-cancelar">Cancelar</button>
+      <button type="button" class="btn btn--primario" id="dialogo-confirmar">Confirmar</button>
+    </div>
+  </div>
+</dialog>
+
+</body>
+</html>

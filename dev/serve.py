@@ -1,20 +1,28 @@
-"""Servidor de desarrollo de ORK3D: sitio estático + API de reseñas con S3 falso.
+"""Servidor de desarrollo de ORK3D: sitio estático, API de reseñas y panel admin con S3 falso.
 
 Uso (desde la raíz del repo):
     python3 dev/serve.py [puerto]          # por defecto 8787, solo 127.0.0.1
 
-Imita a CloudFront: /opinar/<token> → opinar.html, /pagina → pagina.html y
-omite lo que el deploy no publica (api/, dev/, admin/, infra/, docs/).
-La API /api/resenas/* usa api/resenas/app.py con un S3 en memoria; la subida de
-fotos (presigned POST) la recibe /s3-fake/<bucket> y la valida la misma política.
+Imita a CloudFront (infra/redirect-www.js): /opinar/<token> → opinar.html, /pagina → pagina.html,
+/admin/resenas[/<id>] → admin-web/resenas.html y /admin/entrar → admin-web/entrar.html. Omite lo que
+el deploy no publica (api/, dev/, admin/, infra/, docs/).
+
+- /api/resenas/*  → api/resenas/app.py (la Lambda pública).
+- /admin/api/*    → api/resenas/admin_app.py (la Lambda admin). Mismo S3 en memoria que la pública.
+- Correos (aviso de reseña y acceso al panel): simulados. GET /dev/correos los lista; nunca salen.
+- /resenas/*      → export público y fotos públicas desde el S3 falso (como el bucket del sitio).
+- La subida de fotos (presigned POST) la recibe /s3-fake/<bucket> y la valida la misma política.
+
 Los tokens de prueba se generan al arrancar y se listan en GET /dev/tokens.
 Nada de esto se despliega: dev/ está excluido del deploy.
 """
+import base64
 import datetime as dt
 import email.policy
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sys
 from email.parser import BytesParser
@@ -24,8 +32,9 @@ from urllib.parse import urlsplit
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'api', 'resenas'))
 
+import admin_app  # noqa: E402
 import app  # noqa: E402
-from fakes import FakeClientError, FakeS3  # noqa: E402
+from fakes import FakeClientError, FakeCloudFront, FakeS3, FakeSES  # noqa: E402
 
 NO_PUBLICO = {'api', 'dev', 'admin', 'infra', 'docs', '.git', '.github'}
 TIPOS = {
@@ -37,10 +46,18 @@ TIPOS = {
     '.json': 'application/json; charset=utf-8',
     '.html': 'text/html; charset=utf-8',
 }
+# Cache de CloudFront para el export y las fotos públicas (mismos valores que nucleo/publicacion.py).
+CACHE_EXPORT = 'public, max-age=60, must-revalidate'
+CACHE_FOTO = 'public, max-age=31536000, immutable'
+CLAVE_RESENA = re.compile(r'resenas/[a-f0-9]{32}\.json')
+CLAVE_FOTO_PUBLICA = re.compile(r'resenas/fotos/[a-f0-9]{32}\.jpg')
 
 S3 = None
 TOKENS = {}
 PUERTO = 8787
+CORREO = None
+CLOUDFRONT = None
+ADMIN = None
 
 
 class DevS3(FakeS3):
@@ -90,6 +107,30 @@ def sembrar(s3):
     return tokens
 
 
+def _ruta_pagina_admin(ruta):
+    """Reglas de CloudFront del panel: páginas sin datos. Las demás rutas /admin/* no se publican."""
+    if ruta == '/admin/entrar':
+        return '/admin-web/entrar.html'
+    if ruta == '/admin/resenas' or ruta.startswith('/admin/resenas/'):
+        return '/admin-web/resenas.html'
+    return None
+
+
+def configurar_entorno(puerto):
+    """Variables de desarrollo (las mismas que lee la Lambda). Un valor del entorno gana."""
+    base = f'http://127.0.0.1:{puerto}'
+    valores = {
+        'RESENAS_ADMIN_EMAIL': 'admin@ejemplo.invalid',
+        'RESENAS_FROM_EMAIL': 'noreply@ejemplo.invalid',
+        'RESENAS_NOTIFY_ENABLED': 'true',
+        'RESENAS_ADMIN_BASE_URL': base,
+        'ALLOWED_ORIGIN': base,
+    }
+    for clave, valor in valores.items():
+        os.environ.setdefault(clave, valor)
+    return base
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'ORK3D-dev'
 
@@ -106,22 +147,32 @@ class Handler(BaseHTTPRequestHandler):
         self._despachar('OPTIONS')
 
     def _despachar(self, metodo):
-        ruta = urlsplit(self.path).path
+        url = urlsplit(self.path)
+        ruta = url.path
         largo = int(self.headers.get('Content-Length') or 0)
         cuerpo = self.rfile.read(largo) if largo else b''
         if ruta.startswith('/api/resenas'):
             return self._api(metodo, ruta[len('/api/resenas'):] or '/', cuerpo)
+        if ruta == '/admin/api' or ruta.startswith('/admin/api/'):
+            return self._admin_api(metodo, ruta, url.query, cuerpo)
         if ruta.startswith('/s3-fake/') and metodo == 'POST':
             return self._s3_fake(ruta, cuerpo)
         if ruta == '/dev/tokens':
             return self._json(200, TOKENS)
         if ruta == '/dev/state':
             return self._json(200, self._estado())
+        if ruta == '/dev/correos':
+            return self._json(200, self._correos())
         if ruta == '/config.js':
             return self._config()
+        pagina = _ruta_pagina_admin(ruta)
+        if pagina:
+            return self._estatico(pagina)
+        if ruta.startswith('/resenas/') and self._sitio_s3(ruta):
+            return
         return self._estatico(ruta)
 
-    # ── API de reseñas (el mismo handler que la Lambda) ──────────────────
+    # ── API pública de reseñas (el mismo handler que la Lambda) ──────────
     def _api(self, metodo, ruta, cuerpo):
         evento = {
             'requestContext': {'http': {'method': metodo}},
@@ -137,6 +188,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if metodo != 'OPTIONS':
             self.wfile.write(datos)
+
+    # ── API admin V2 (el mismo handler que la Lambda admin) ──────────────
+    def _admin_api(self, metodo, ruta, consulta, cuerpo):
+        evento = {
+            'requestContext': {'http': {'method': metodo}},
+            'rawPath': ruta,
+            'rawQueryString': consulta,
+            'headers': {clave: valor for clave, valor in self.headers.items()},
+            'body': cuerpo,
+        }
+        r = admin_app.a_respuesta_http(ADMIN.atender(*admin_app.evento_a_entrada(evento)))
+        datos = base64.b64decode(r['body']) if r['isBase64Encoded'] else r['body'].encode('utf-8')
+        self.send_response(r['statusCode'])
+        for clave, valor in r['headers'].items():
+            self.send_header(clave, valor)
+        for cookie in r['cookies']:  # una cabecera Set-Cookie por cookie
+            self.send_header('Set-Cookie', cookie)
+        self.send_header('Content-Length', str(len(datos)))
+        self.end_headers()
+        self.wfile.write(datos)
 
     # ── Subida firmada a S3 (multipart del navegador) ────────────────────
     def _s3_fake(self, ruta, cuerpo):
@@ -164,10 +235,26 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('x-dev-bucket', bucket)
         self.end_headers()
 
+    # ── Sitio: export y fotos públicas (bucket del sitio, acá en el S3 falso) ──
+    def _sitio_s3(self, ruta):
+        """True si la ruta es del export o de una foto pública (se respondió aquí o con 404)."""
+        clave = ruta.lstrip('/')
+        if clave == 'resenas/publicas.json':
+            tipo, cache = 'application/json; charset=utf-8', CACHE_EXPORT
+        elif CLAVE_FOTO_PUBLICA.fullmatch(clave):
+            tipo, cache = 'image/jpeg', CACHE_FOTO
+        else:
+            return False
+        if clave not in S3.objects:
+            self._texto(404, 'No encontrado')
+            return True
+        self._bytes(200, tipo, S3.objects[clave], cache=cache)
+        return True
+
     # ── Vistas de depuración ─────────────────────────────────────────────
     def _estado(self):
         resenas = []
-        for clave in sorted(k for k in S3.objects if k.startswith('resenas/')):
+        for clave in sorted(k for k in S3.objects if CLAVE_RESENA.fullmatch(k)):
             r = json.loads(S3.objects[clave])
             if r.get('photo_key'):
                 datos = S3.objects[r['photo_key']]
@@ -180,6 +267,11 @@ class Handler(BaseHTTPRequestHandler):
         claims = sorted(k for k in S3.objects if k.startswith('claims/'))
         return {'resenas': resenas, 'claims': len(claims),
                 'pendientes': sorted(k for k in S3.objects if k.startswith('pendientes/'))}
+
+    def _correos(self):
+        """Correos simulados (nunca salen a internet): aviso de reseña y acceso al panel."""
+        return [{'to': c['to'], 'from': c['from'], 'subject': c['subject'],
+                 'text': c['text'], 'html': c['html']} for c in CORREO.enviados]
 
     def _config(self):
         with open(os.path.join(ROOT, 'config.js'), encoding='utf-8') as f:
@@ -208,11 +300,11 @@ class Handler(BaseHTTPRequestHandler):
             self._bytes(200, tipo, f.read())
 
     # ── Respuestas ───────────────────────────────────────────────────────
-    def _bytes(self, estado, tipo, datos):
+    def _bytes(self, estado, tipo, datos, cache='no-store'):
         self.send_response(estado)
         self.send_header('Content-Type', tipo)
         self.send_header('Content-Length', str(len(datos)))
-        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Cache-Control', cache)
         self.end_headers()
         self.wfile.write(datos)
 
@@ -224,14 +316,27 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global S3, TOKENS, PUERTO
+    global S3, TOKENS, PUERTO, CORREO, CLOUDFRONT, ADMIN
     PUERTO = int(sys.argv[1]) if len(sys.argv) > 1 else 8787
+    base = configurar_entorno(PUERTO)
     S3 = DevS3()
     TOKENS = sembrar(S3)
-    app._SVC = app.Service(S3, 'dev-resenas', f'http://127.0.0.1:{PUERTO}',
-                           google_review_url='https://g.page/r/dev-ork3d/review')
+    CORREO = FakeSES()
+    CLOUDFRONT = FakeCloudFront()
+    notificar = os.environ['RESENAS_NOTIFY_ENABLED'].lower() == 'true'
+    correo_svc = CORREO if notificar else None
+    app._SVC = app.Service(S3, 'dev-resenas', base,
+                           google_review_url='https://g.page/r/dev-ork3d/review',
+                           correo=correo_svc, base_url=base,
+                           origen_correo=os.environ['RESENAS_FROM_EMAIL'],
+                           destino_correo=os.environ['RESENAS_ADMIN_EMAIL'])
+    ADMIN = admin_app.ServicioAdmin(
+        S3, bucket_privado='dev-resenas', bucket_sitio='dev-sitio', origen_permitido=base,
+        base_url=base, correo_svc=CORREO, correo_origen=os.environ['RESENAS_FROM_EMAIL'],
+        correo_destino=os.environ['RESENAS_ADMIN_EMAIL'], invalidador=CLOUDFRONT)
     servidor = ThreadingHTTPServer(('127.0.0.1', PUERTO), Handler)
-    print(f'ORK3D dev en http://127.0.0.1:{PUERTO}', flush=True)
+    print(f'ORK3D dev en {base}', flush=True)
+    print(f'Panel admin: {base}/admin/resenas · correos simulados: {base}/dev/correos', flush=True)
     servidor.serve_forever()
 
 

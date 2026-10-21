@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#191919" />
+<!-- Página de acceso: no indexar, no filtrar la URL por el Referer y sin scripts inline ni terceros. -->
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'" />
+
+<title>Confirmar acceso · Panel ORK3D</title>
+
+<link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg" />
+<link rel="stylesheet" href="/assets/css/admin.css?v=1" />
+<script src="/assets/js/admin-comun.js?v=1" defer></script>
+<script src="/assets/js/admin-entrar.js?v=1" defer></script>
+</head>
+<body class="adm">
+
+<header class="adm__cab">
+  <div class="adm__cab-inner">
+    <p class="adm__marca">ORK3D <span class="adm__marca-sub">Reseñas</span></p>
+  </div>
+</header>
+
+<main id="principal" class="adm__main" tabindex="-1">
+  <!-- Esta página no consume el acceso al cargarse: solo el clic en "Confirmar acceso" lo hace. -->
+  <section class="adm__seccion adm__seccion--centro" aria-labelledby="titulo-entrar">
+    <h1 class="adm__titulo" id="titulo-entrar">Confirmar acceso</h1>
+    <p class="adm__texto" id="texto-entrar">Confirmá que querés entrar al panel de reseñas de ORK3D. El enlace sirve una sola vez.</p>
+    <button type="button" class="btn btn--primario" id="confirmar-acceso" disabled>Confirmar acceso</button>
+    <p class="adm__aviso" id="aviso-acceso" role="status" aria-live="polite" hidden></p>
+    <p><a class="adm__volver" id="pedir-nuevo" href="/admin/resenas">Pedir un enlace nuevo</a></p>
+  </section>
+</main>
+
+</body>
+</html>
