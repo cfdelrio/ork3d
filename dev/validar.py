@@ -276,6 +276,20 @@ def validar_admin_v2():
     comprobar('Admin: resenas-setup.sh detiene el deploy sin el núcleo',
               'if [[ ! -d api/resenas/nucleo ]]; then' in leer('infra/resenas-setup.sh'))
 
+    # OAC hacia la Function URL: exactamente dos acciones, solo para cloudfront.amazonaws.com y la distribución.
+    spec_permisos = json.loads(leer('infra/resenas/admin-function-url-permisos.json'))['Statement']
+    conceden = {st['Action'] for st in spec_permisos
+                if st.get('Principal') == {'Service': 'cloudfront.amazonaws.com'}
+                and 'distribution/__DISTRIBUTION_ID__' in json.dumps(st.get('Condition', {}))}
+    comprobar('Admin OAC: la especificación concede InvokeFunctionUrl e InvokeFunction a cloudfront.amazonaws.com por SourceArn',
+              conceden == {'lambda:InvokeFunctionUrl', 'lambda:InvokeFunction'}, str(sorted(conceden)))
+    # Forwarding de CloudFront: x-amz-content-sha256 y la cookie de sesión llegan al origen; nada de Host.
+    orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
+    cabeceras = [h.lower() for h in orp['HeadersConfig']['Headers']['Items']]
+    comprobar('Admin CloudFront: la política de origen reenvía x-amz-content-sha256, la cookie ork3d_admin y no reenvía Host',
+              'x-amz-content-sha256' in cabeceras and orp['CookiesConfig']['Cookies']['Items'] == ['ork3d_admin']
+              and 'host' not in cabeceras)
+
 
 def main():
     validar_javascript()

@@ -1,0 +1,34 @@
+{
+  "Name": "ork3d-resenas-admin-orp",
+  "Comment": "Panel admin V2: reenvía al origen solo la cookie de sesión, los headers de mutación y el hash del body (OAC). Sin Host.",
+  "HeadersConfig": {
+    "HeaderBehavior": "whitelist",
+    "Headers": {
+      "Quantity": 4,
+      "Items": [
+        "Content-Type",
+        "Origin",
+        "X-Admin-Request",
+        "x-amz-content-sha256"
+      ]
+    }
+  },
+  "CookiesConfig": {
+    "CookieBehavior": "whitelist",
+    "Cookies": {
+      "Quantity": 1,
+      "Items": [
+        "ork3d_admin"
+      ]
+    }
+  },
+  "QueryStringsConfig": {
+    "QueryStringBehavior": "whitelist",
+    "QueryStrings": {
+      "Quantity": 1,
+      "Items": [
+        "estado"
+      ]
+    }
+  }
+}

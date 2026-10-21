@@ -501,5 +501,30 @@ class RespuestasTest(AdminSesionCase):
         self.assertNotIn('secreto-interno-123', r['body'])
 
 
+class MetodosReenviadosTest(AdminSesionCase):
+    """El preset de CloudFront con POST también reenvía PUT, PATCH y DELETE al origen. La Lambda los rechaza
+    (405) antes de tocar nada: ni escrituras, ni borrados, ni correos, ni invalidaciones."""
+
+    def test_metodos_distintos_de_post_no_producen_efectos(self):
+        rid = self.sembrar_resena(status='pending', foto=True)
+        rutas = ['/admin/api/sesion/solicitar', '/admin/api/sesion/confirmar', '/admin/api/sesion/cerrar',
+                 '/admin/api/invitaciones', '/admin/api/exportar'] + \
+                [f'/admin/api/resenas/{rid}/{accion}' for accion in
+                 ['aprobar', 'rechazar', 'ocultar', 'restaurar', 'reenviar-aviso']]
+        antes = dict(self.s3.objects)
+        escrituras, borrados = len(self.s3.escrituras), len(self.s3.borrados)
+        correos, invalidaciones = len(self.ses.enviados), len(self.cf.invalidaciones)
+        for metodo in ['PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']:
+            for ruta in rutas:
+                with self.subTest(metodo=metodo, ruta=ruta):
+                    r = self.pedir(metodo, ruta, {}, cookies=self.cookies)
+                    self.assertEqual(r['statusCode'], 405)
+        self.assertEqual(self.s3.objects, antes)
+        self.assertEqual(self.s3.escrituras[escrituras:], [])
+        self.assertEqual(self.s3.borrados[borrados:], [])
+        self.assertEqual(len(self.ses.enviados), correos)
+        self.assertEqual(len(self.cf.invalidaciones), invalidaciones)
+
+
 if __name__ == '__main__':
     unittest.main()

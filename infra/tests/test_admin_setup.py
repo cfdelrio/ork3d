@@ -53,8 +53,8 @@ def sentencias(rel):
     return json.loads(leer(rel))['Statement']
 
 
-class PlanDryRun(unittest.TestCase):
-    """Corre infra/admin-setup.sh en una copia temporal con un entorno limpio."""
+class HarnessPlan(unittest.TestCase):
+    """Corre infra/admin-setup.sh en una copia temporal con un entorno limpio (sin pruebas: las usan las clases de abajo)."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix='admin-setup-')
@@ -94,6 +94,9 @@ class PlanDryRun(unittest.TestCase):
             return []
         with open(self.log, encoding='utf-8') as f:
             return f.read().splitlines()
+
+class PlanDryRun(HarnessPlan):
+    """Pruebas del plan: DRY_RUN por defecto, sin llamadas, contadores, variables y plantillas."""
 
     def test_dry_run_es_el_valor_por_defecto(self):
         r = self.correr()
@@ -136,7 +139,7 @@ class PlanDryRun(unittest.TestCase):
                           'update-function', 'publish-function', '--function-name ork3d-resenas-admin',
                           'python3.12', 'admin_app.handler', '--timeout 10', '--memory-size 256'):
             self.assertIn(fragmento, r.stdout, fragmento)
-        self.assertIn('Resumen: 7 llamadas simuladas (dry-run), 8 comandos PLAN', r.stdout)
+        self.assertIn('Resumen: 7 llamadas simuladas (dry-run), 10 comandos PLAN', r.stdout)
         self.assertIn('0 llamadas reales', r.stdout)
 
     def test_variables_de_correo_son_obligatorias_y_no_se_inventan(self):
@@ -260,7 +263,7 @@ class PoliticasYLifecycle(unittest.TestCase):
         self.assertEqual(b['PathPattern'], '/admin/api/*')
         self.assertEqual(b['FunctionAssociations']['Quantity'], 0)
         self.assertEqual(b['CachePolicyId'], '4135ea2d-6df8-44a3-9df3-4b5a84be39ad')
-        self.assertEqual(b['OriginRequestPolicyId'], 'b689b0a8-53d0-40ab-baf2-68738e2966ac')
+        self.assertEqual(b['OriginRequestPolicyId'], '__ADMIN_ORP_ID__')
         self.assertEqual(b['AllowedMethods']['Quantity'], len(b['AllowedMethods']['Items']))
         self.assertIn('POST', b['AllowedMethods']['Items'])
         self.assertEqual(b['ViewerProtocolPolicy'], 'https-only')
@@ -325,6 +328,149 @@ class EmpaquetadoYDeploy(unittest.TestCase):
         self.assertTrue(os.access(os.path.join(RAIZ, SCRIPT), os.X_OK))
         self.assertIn('set -euo pipefail', leer(SCRIPT))
         self.assertIn('DRY_RUN="${DRY_RUN:-1}"', leer(SCRIPT))
+
+
+
+# ── OAC: permisos de invocación de la Function URL y reenvío de CloudFront ─────────────────────────
+
+PERMISOS_OAC = {  # acción -> Sid esperado en el plan. Las dos son obligatorias.
+    'lambda:InvokeFunctionUrl': 'AllowCloudFrontOACInvokeFunctionUrl',
+    'lambda:InvokeFunction': 'AllowCloudFrontOACInvokeFunction',
+}
+ARN_DISTRIBUCION = 'arn:aws:cloudfront::<ACCOUNT_ID>:distribution/EPRUEBAABCDEF'
+METODOS_CON_POST = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'POST', 'PATCH', 'DELETE']  # el único preset de CloudFront con POST
+CABECERAS_REQUERIDAS = ['content-type', 'origin', 'x-admin-request', 'x-amz-content-sha256']
+
+
+def valor_de(linea, bandera):
+    """Valor que sigue a una bandera de la línea de comando (p. ej. --action -> lambda:InvokeFunction)."""
+    tokens = linea.split()
+    if bandera not in tokens or tokens.index(bandera) + 1 >= len(tokens):
+        return None
+    return tokens[tokens.index(bandera) + 1]
+
+
+def permisos_oac_faltantes(salida):
+    """Acciones de PERMISOS_OAC que el plan no concede a cloudfront.amazonaws.com sobre la distribución."""
+    lineas = [linea for linea in salida.splitlines() if 'aws lambda add-permission' in linea]
+    faltan = set()
+    for accion, sid in PERMISOS_OAC.items():
+        concedido = any(
+            valor_de(linea, '--action') == accion
+            and valor_de(linea, '--statement-id') == sid
+            and valor_de(linea, '--principal') == 'cloudfront.amazonaws.com'
+            and valor_de(linea, '--source-arn') == ARN_DISTRIBUCION
+            for linea in lineas
+        )
+        if not concedido:
+            faltan.add(accion)
+    return faltan
+
+
+def reenvio_faltante(orp):
+    """Lo que la API necesita y la política de origen no reenvía: cabeceras de mutación, hash y cookie de sesión."""
+    faltan = set()
+    items = [h.lower() for h in orp.get('HeadersConfig', {}).get('Headers', {}).get('Items', [])]
+    for requerida in CABECERAS_REQUERIDAS:
+        if requerida not in items:
+            faltan.add(requerida)
+    if 'ork3d_admin' not in orp.get('CookiesConfig', {}).get('Cookies', {}).get('Items', []):
+        faltan.add('cookie:ork3d_admin')
+    return faltan
+
+
+class PermisosOACyReenvio(HarnessPlan):
+    """Dos permisos de OAC para la Function URL, política de origen propia y behavior sin caché (sin AWS)."""
+
+    def salida_plan(self):
+        r = self.correr()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.llamadas(), [], 'el dry-run no debe llamar a aws, curl ni wget')
+        return r.stdout
+
+    def test_plan_muestra_los_dos_permisos_de_oac_explicitos(self):
+        salida = self.salida_plan()
+        self.assertEqual(permisos_oac_faltantes(salida), set(), 'el plan debe conceder ambas acciones a CloudFront')
+        self.assertEqual(sum('aws lambda add-permission' in l for l in salida.splitlines()), 2)
+
+    def test_falta_cualquiera_de_los_dos_permisos_hace_fallar(self):
+        salida = self.salida_plan()
+        for accion in PERMISOS_OAC:
+            with self.subTest(accion=accion):
+                sin_la_accion = '\n'.join(l for l in salida.splitlines() if valor_de(l, '--action') != accion)
+                self.assertEqual(permisos_oac_faltantes(sin_la_accion), {accion})
+
+    def test_principal_ampliado_o_fuente_distinta_hace_fallar(self):
+        salida = self.salida_plan()
+        self.assertNotEqual(permisos_oac_faltantes(salida.replace('--principal cloudfront.amazonaws.com', '--principal "*"')), set())
+        self.assertNotEqual(permisos_oac_faltantes(salida.replace(ARN_DISTRIBUCION, 'arn:aws:cloudfront::<ACCOUNT_ID>:distribution/EOTRA')), set())
+
+    def test_permisos_del_plan_coinciden_con_la_especificacion(self):
+        salida = self.salida_plan()
+        spec = json.loads(leer('infra/resenas/admin-function-url-permisos.json'))
+        self.assertEqual({st['Action'] for st in spec['Statement']}, set(PERMISOS_OAC))
+        for st in spec['Statement']:
+            with self.subTest(sid=st['Sid']):
+                self.assertEqual(st['Effect'], 'Allow')
+                self.assertEqual(st['Principal'], {'Service': 'cloudfront.amazonaws.com'})
+                self.assertEqual(PERMISOS_OAC[st['Action']], st['Sid'])
+                self.assertTrue(st['Resource'].endswith(':function:ork3d-resenas-admin'))
+                self.assertEqual(st['Condition'], {'ArnLike': {'AWS:SourceArn': 'arn:aws:cloudfront::__ACCOUNT_ID__:distribution/__DISTRIBUTION_ID__'}})
+                self.assertIn(f"--statement-id {st['Sid']} --action {st['Action']} ", salida)
+
+    def test_permisos_se_conceden_antes_de_asociar_la_distribucion(self):
+        salida = self.salida_plan()
+        ultimo_permiso = max(salida.index('--action lambda:InvokeFunctionUrl '), salida.index('--action lambda:InvokeFunction '))
+        self.assertLess(ultimo_permiso, salida.index('aws cloudfront update-distribution'))
+
+    def test_politica_de_origen_se_crea_antes_del_behavior(self):
+        salida = self.salida_plan()
+        self.assertLess(salida.index('aws cloudfront create-origin-request-policy'), salida.index('aws cloudfront update-distribution'))
+        self.assertIn('__ADMIN_ORP_ID__', salida)
+
+    def test_politica_de_origen_reenvia_solo_lo_que_usa_la_api(self):
+        orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
+        self.assertEqual(reenvio_faltante(orp), set())
+        items = [h.lower() for h in orp['HeadersConfig']['Headers']['Items']]
+        self.assertEqual(orp['HeadersConfig']['HeaderBehavior'], 'whitelist')
+        self.assertEqual(orp['HeadersConfig']['Headers']['Quantity'], len(items))
+        self.assertNotIn('host', items)
+        self.assertEqual(orp['CookiesConfig'], {'CookieBehavior': 'whitelist', 'Cookies': {'Quantity': 1, 'Items': ['ork3d_admin']}})
+        self.assertEqual(orp['QueryStringsConfig'], {'QueryStringBehavior': 'whitelist', 'QueryStrings': {'Quantity': 1, 'Items': ['estado']}})
+        self.assertNotIn('_estado', orp, 'el archivo se pasa tal cual a la CLI: sin claves extra')
+
+    def test_falta_el_hash_o_la_cookie_en_la_politica_hace_fallar(self):
+        orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
+        sin_hash = json.loads(json.dumps(orp))
+        sin_hash['HeadersConfig']['Headers']['Items'].remove('x-amz-content-sha256')
+        sin_hash['HeadersConfig']['Headers']['Quantity'] -= 1
+        self.assertEqual(reenvio_faltante(sin_hash), {'x-amz-content-sha256'})
+        sin_cookie = json.loads(json.dumps(orp))
+        sin_cookie['CookiesConfig']['Cookies']['Items'] = []
+        sin_cookie['CookiesConfig']['Cookies']['Quantity'] = 0
+        self.assertEqual(reenvio_faltante(sin_cookie), {'cookie:ork3d_admin'})
+
+    def test_behavior_sin_cache_y_con_politica_de_origen_propia(self):
+        b = json.loads(leer('infra/resenas/admin-cloudfront-behavior.json'))['behavior']
+        self.assertEqual(b['CachePolicyId'], '4135ea2d-6df8-44a3-9df3-4b5a84be39ad')  # CachingDisabled
+        self.assertEqual(b['OriginRequestPolicyId'], '__ADMIN_ORP_ID__')
+        self.assertEqual(b['PathPattern'], '/admin/api/*')
+        self.assertEqual(b['ViewerProtocolPolicy'], 'https-only')
+
+    def test_metodos_del_behavior_son_el_preset_de_cloudfront_con_post(self):
+        b = json.loads(leer('infra/resenas/admin-cloudfront-behavior.json'))['behavior']
+        self.assertEqual(b['AllowedMethods']['Quantity'], len(METODOS_CON_POST))
+        self.assertEqual(sorted(b['AllowedMethods']['Items']), sorted(METODOS_CON_POST))
+        self.assertEqual(sorted(b['AllowedMethods']['CachedMethods']['Items']), ['GET', 'HEAD'])
+
+    def test_especificacion_de_permisos_solo_para_cloudfront_y_la_distribucion(self):
+        spec = json.loads(leer('infra/resenas/admin-function-url-permisos.json'))
+        texto = json.dumps(spec)
+        self.assertNotIn('"*"', texto)
+        self.assertEqual(len(spec['Statement']), len(PERMISOS_OAC))
+        for st in spec['Statement']:
+            self.assertEqual(st['Principal'], {'Service': 'cloudfront.amazonaws.com'})
+            self.assertIn('distribution/__DISTRIBUTION_ID__', st['Condition']['ArnLike']['AWS:SourceArn'])
 
 
 if __name__ == '__main__':

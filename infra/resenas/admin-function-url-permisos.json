@@ -1,0 +1,35 @@
+{
+  "_estado": "PLAN. Dos sentencias de la política basada en recursos de la función ork3d-resenas-admin. Se crean con aws lambda add-permission (una por sentencia); no se editan a mano.",
+  "_nota": "CloudFront (OAC) necesita lambda:InvokeFunctionUrl y lambda:InvokeFunction sobre la función. Principal: solo cloudfront.amazonaws.com. Condición: SourceArn = la distribución. No ampliar el principal ni quitar la condición. Verificar en la documentación de AWS antes del deploy.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontOACInvokeFunctionUrl",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudfront.amazonaws.com"
+      },
+      "Action": "lambda:InvokeFunctionUrl",
+      "Resource": "arn:aws:lambda:__AWS_REGION__:__ACCOUNT_ID__:function:ork3d-resenas-admin",
+      "Condition": {
+        "ArnLike": {
+          "AWS:SourceArn": "arn:aws:cloudfront::__ACCOUNT_ID__:distribution/__DISTRIBUTION_ID__"
+        }
+      }
+    },
+    {
+      "Sid": "AllowCloudFrontOACInvokeFunction",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudfront.amazonaws.com"
+      },
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:__AWS_REGION__:__ACCOUNT_ID__:function:ork3d-resenas-admin",
+      "Condition": {
+        "ArnLike": {
+          "AWS:SourceArn": "arn:aws:cloudfront::__ACCOUNT_ID__:distribution/__DISTRIBUTION_ID__"
+        }
+      }
+    }
+  ]
+}

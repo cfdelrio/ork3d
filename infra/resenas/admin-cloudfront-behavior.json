@@ -10,7 +10,9 @@
       "OriginProtocolPolicy": "https-only",
       "OriginSslProtocols": {
         "Quantity": 1,
-        "Items": ["TLSv1.2"]
+        "Items": [
+          "TLSv1.2"
+        ]
       }
     }
   },
@@ -20,14 +22,25 @@
     "ViewerProtocolPolicy": "https-only",
     "AllowedMethods": {
       "Quantity": 7,
-      "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+      "Items": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "PUT",
+        "POST",
+        "PATCH",
+        "DELETE"
+      ],
       "CachedMethods": {
         "Quantity": 2,
-        "Items": ["GET", "HEAD"]
+        "Items": [
+          "GET",
+          "HEAD"
+        ]
       }
     },
     "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-    "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+    "OriginRequestPolicyId": "__ADMIN_ORP_ID__",
     "Compress": false,
     "FunctionAssociations": {
       "Quantity": 0,
@@ -35,10 +48,12 @@
     }
   },
   "notas": [
-    "CachePolicyId 4135ea2d-... es CachingDisabled y OriginRequestPolicyId b689b0a8-... es AllViewerExceptHostHeader. Son IDs de políticas administradas de CloudFront: verificarlos en la cuenta antes del deploy.",
-    "El origen es la Function URL de la Lambda admin (host sin https://). No es la Function URL pública de ork3d-resenas.",
+    "CachePolicyId 4135ea2d-... es CachingDisabled: el caché queda apagado para /admin/api/*. Verificar el Id en la cuenta antes del deploy.",
+    "OriginRequestPolicyId es __ADMIN_ORP_ID__: el Id que devuelve create-origin-request-policy (infra/resenas/admin-origin-request-policy.json). No usar la política administrada AllViewerExceptHostHeader: reenvía todas las cookies y headers del viewer.",
+    "AllowedMethods: CloudFront solo ofrece tres juegos: GET/HEAD; GET/HEAD/OPTIONS; y GET/HEAD/OPTIONS/PUT/POST/PATCH/DELETE. POST exige el tercero. PUT, PATCH y DELETE llegan al origen y la Lambda responde 405 sin efectos (test_admin_api).",
+    "El origen es la Function URL de la Lambda admin con OAC (host sin https://). No es la Function URL pública de ork3d-resenas.",
+    "Antes del deploy: validar OAC + Function URL AWS_IAM con POST que lleve x-amz-content-sha256, y que la cookie ork3d_admin llega a la Lambda.",
     "FunctionAssociations vacío: ninguna función viewer-request sobre /admin/api/*. ork3d-redirect-www solo va en el default behavior.",
-    "Antes del deploy: validar OAC con Function URL AWS_IAM, incluido POST con firma de payload, y que las cookies llegan a la Lambda.",
     "Este archivo es un plan. El bloque behavior va en CacheBehaviors y el bloque origen en Origins.Items de la distribución; no se pasa tal cual a AWS."
   ]
 }
