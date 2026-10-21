@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#191919" />
+<!-- Página con token en la URL: no indexar, no filtrar el token por el Referer, sin terceros. -->
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+
+<title>Tu opinión sobre tu pedido | ORK3D</title>
+
+<link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=13" />
+<link rel="stylesheet" href="/assets/css/opinar.css?v=1" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="container nav__inner">
+    <a href="/" class="nav__logo" aria-label="ORK3D inicio">
+      <span class="nav__logo-text">ORK<span class="accent">3D</span></span>
+    </a>
+    <span class="opinar__marca">Tu opinión</span>
+  </div>
+</header>
+
+<main class="opinar">
+  <div class="container opinar__inner">
+    <div class="opinar__card">
+      <p class="opinar__kicker">Tu pedido</p>
+      <h1 id="titulo" tabindex="-1">Contanos cómo te llegó</h1>
+
+      <noscript><p class="opinar__aviso">Necesitás JavaScript activado para enviar tu opinión.</p></noscript>
+
+      <!-- Estado de verificación del enlace y mensajes de error de acceso -->
+      <div id="estado" class="opinar__estado" role="status" aria-live="polite">
+        <p>Verificando tu enlace…</p>
+      </div>
+
+      <!-- Formulario: se muestra solo si el enlace es válido -->
+      <form id="formulario" class="opinar__form" novalidate hidden>
+        <p class="opinar__lead">Tarda menos de dos minutos. La revisamos antes de publicarla.</p>
+        <p class="opinar__producto" id="producto"></p>
+
+        <fieldset class="campo" aria-describedby="err-rating">
+          <legend>¿Cuántas estrellas le das? <span class="campo__req">obligatorio</span></legend>
+          <div class="estrellas" id="estrellas">
+            <input type="radio" name="rating" id="rating-5" value="5" />
+            <label for="rating-5"><span class="sr">5 estrellas</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.94 6.02 6.64.96-4.8 4.68 1.13 6.6L12 17.6l-5.91 3.16 1.13-6.6-4.8-4.68 6.64-.96z"/></svg></label>
+            <input type="radio" name="rating" id="rating-4" value="4" />
+            <label for="rating-4"><span class="sr">4 estrellas</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.94 6.02 6.64.96-4.8 4.68 1.13 6.6L12 17.6l-5.91 3.16 1.13-6.6-4.8-4.68 6.64-.96z"/></svg></label>
+            <input type="radio" name="rating" id="rating-3" value="3" />
+            <label for="rating-3"><span class="sr">3 estrellas</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.94 6.02 6.64.96-4.8 4.68 1.13 6.6L12 17.6l-5.91 3.16 1.13-6.6-4.8-4.68 6.64-.96z"/></svg></label>
+            <input type="radio" name="rating" id="rating-2" value="2" />
+            <label for="rating-2"><span class="sr">2 estrellas</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.94 6.02 6.64.96-4.8 4.68 1.13 6.6L12 17.6l-5.91 3.16 1.13-6.6-4.8-4.68 6.64-.96z"/></svg></label>
+            <input type="radio" name="rating" id="rating-1" value="1" />
+            <label for="rating-1"><span class="sr">1 estrella</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.94 6.02 6.64.96-4.8 4.68 1.13 6.6L12 17.6l-5.91 3.16 1.13-6.6-4.8-4.68 6.64-.96z"/></svg></label>
+          </div>
+          <p class="campo__error" id="err-rating" hidden></p>
+        </fieldset>
+
+        <fieldset class="campo" aria-describedby="err-aspects">
+          <legend>¿Qué te gustó o qué mejorarías? <span class="campo__op">opcional</span></legend>
+          <div class="chips">
+            <label class="chip"><input type="checkbox" name="aspects" value="diseno" /><span>Diseño</span></label>
+            <label class="chip"><input type="checkbox" name="aspects" value="personalizacion" /><span>Personalización</span></label>
+            <label class="chip"><input type="checkbox" name="aspects" value="calidad" /><span>Calidad</span></label>
+            <label class="chip"><input type="checkbox" name="aspects" value="fecha" /><span>Fecha de entrega</span></label>
+            <label class="chip"><input type="checkbox" name="aspects" value="atencion" /><span>Atención</span></label>
+            <label class="chip"><input type="checkbox" name="aspects" value="resultado" /><span>Resultado final</span></label>
+          </div>
+          <p class="campo__error" id="err-aspects" hidden></p>
+        </fieldset>
+
+        <div class="campo">
+          <label for="comentario">Tu comentario <span class="campo__op">opcional · se puede publicar</span></label>
+          <textarea id="comentario" name="comment" rows="4" maxlength="600" aria-describedby="err-comment cont-comment"></textarea>
+          <p class="campo__ayuda" id="cont-comment"><span id="cuenta-comentario">0</span> / 600</p>
+          <p class="campo__error" id="err-comment" hidden></p>
+        </div>
+
+        <div class="campo campo--foto">
+          <label for="foto">Una foto de tu pedido <span class="campo__op">opcional</span></label>
+          <p class="campo__ayuda">JPG, PNG o WebP. Quitamos los datos ocultos de la foto (ubicación, fecha) antes de subirla.</p>
+          <div class="foto-entrada">
+            <input type="file" id="foto" name="foto" accept="image/*" class="foto-entrada__input" aria-describedby="foto-estado err-photo_key" />
+            <label for="foto" class="btn btn--ghost foto-entrada__boton">Elegir foto</label>
+          </div>
+          <div class="foto" id="foto-bloque" hidden>
+            <img id="foto-preview" alt="Vista previa de tu foto" />
+            <button type="button" class="btn btn--ghost" id="foto-quitar">Quitar foto</button>
+          </div>
+          <p class="campo__ayuda" id="foto-estado" aria-live="polite"></p>
+          <p class="campo__error" id="err-photo_key" hidden></p>
+        </div>
+
+        <fieldset class="campo" aria-describedby="err-display_mode">
+          <legend>¿Cómo querés figurar? <span class="campo__req">obligatorio</span></legend>
+          <div class="opciones">
+            <label class="opcion"><input type="radio" name="display_mode" id="modo-inicial" value="inicial" checked /><span>Nombre y primera letra del apellido <em>(Ana G.)</em></span></label>
+            <label class="opcion"><input type="radio" name="display_mode" value="nombre" /><span>Solo mi nombre <em>(Ana)</em></span></label>
+            <label class="opcion"><input type="radio" name="display_mode" value="anonimo" /><span>Anónimo <em>(Cliente de ORK3D)</em></span></label>
+          </div>
+          <p class="campo__error" id="err-display_mode" hidden></p>
+        </fieldset>
+
+        <div class="campo" id="bloque-nombre">
+          <label for="nombre">Tu nombre <span class="campo__req">obligatorio para publicar</span></label>
+          <input type="text" id="nombre" name="name" maxlength="40" autocomplete="given-name" aria-describedby="err-name" />
+          <p class="campo__error" id="err-name" hidden></p>
+        </div>
+
+        <div class="campo">
+          <label for="privado">Algo que podamos mejorar <span class="campo__op">opcional · solo lo lee el equipo de ORK3D</span></label>
+          <textarea id="privado" name="private_feedback" rows="3" maxlength="800" aria-describedby="err-private_feedback"></textarea>
+          <p class="campo__error" id="err-private_feedback" hidden></p>
+        </div>
+
+        <div class="campo">
+          <label class="opcion opcion--check"><input type="checkbox" id="pide-contacto" name="contact_requested" /><span>Quiero que nos contactemos por este tema</span></label>
+          <div id="bloque-contacto" hidden>
+            <label for="contacto">¿Cómo te contactamos? <span class="campo__ayuda">email o WhatsApp</span></label>
+            <input type="text" id="contacto" name="contact" maxlength="120" autocomplete="off" aria-describedby="err-contact" />
+            <p class="campo__error" id="err-contact" hidden></p>
+          </div>
+        </div>
+
+        <div class="campo">
+          <label class="opcion opcion--check"><input type="checkbox" id="permiso" name="permission_to_publish" /><span>Autorizo a ORK3D a publicar mi reseña y, si subí una, mi foto en su sitio web. Puedo pedir que la quiten escribiéndonos por WhatsApp.</span></label>
+          <p class="campo__error" id="err-permission_to_publish" hidden></p>
+        </div>
+
+        <!-- Campo trampa para bots: oculto a personas, sin autocompletado. -->
+        <div class="opinar__trampa" aria-hidden="true">
+          <label>Sitio web <input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+        </div>
+
+        <p class="campo__error opinar__general" id="err-general" role="alert" hidden></p>
+
+        <button type="submit" class="btn btn--primary btn--lg opinar__enviar" id="enviar">Enviar reseña</button>
+      </form>
+
+      <!-- Confirmación después de enviar -->
+      <div id="gracias" class="opinar__estado" role="status" hidden>
+        <p>La revisamos antes de publicarla. Si aprobamos tu reseña, la vas a ver en nuestra web.</p>
+        <a id="google-cta" class="btn btn--ghost" href="#" target="_blank" rel="noopener noreferrer" hidden>Dejanos también una reseña en Google</a>
+      </div>
+    </div>
+
+    <p class="opinar__ayuda">¿Necesitás ayuda? <a href="#" data-wa-link>Escribinos por WhatsApp</a>.</p>
+  </div>
+</main>
+
+<footer class="opinar__footer">
+  <div class="container">
+    <small>© <span id="year"></span> ORK3D · Buenos Aires, Argentina · <a href="/">Volver al inicio</a></small>
+  </div>
+</footer>
+
+<script src="/config.js"></script>
+<script src="/assets/js/opinar.js?v=1"></script>
+</body>
+</html>

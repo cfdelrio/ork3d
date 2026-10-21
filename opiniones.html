@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#191919" />
+
+<title>Opiniones de clientes | ORK3D</title>
+<meta name="description" content="Lo que dicen los clientes de ORK3D sobre trofeos, medallas y piezas personalizadas. Reseñas de pedidos reales, revisadas antes de publicarse." />
+<link rel="canonical" href="https://ork3d.com/opiniones" />
+
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://ork3d.com/opiniones" />
+<meta property="og:title" content="Opiniones de clientes | ORK3D" />
+<meta property="og:description" content="Reseñas de pedidos reales de trofeos, medallas y piezas personalizadas." />
+<meta property="og:image" content="https://ork3d.com/assets/img/og-cover.svg" />
+<meta property="og:locale" content="es_AR" />
+
+<link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=13" />
+<link rel="stylesheet" href="/assets/css/opiniones.css?v=1" />
+</head>
+<body>
+
+<header class="nav" id="nav">
+  <div class="container nav__inner">
+    <a href="/" class="nav__logo" aria-label="ORK3D inicio">
+      <span class="nav__logo-text">ORK<span class="accent">3D</span></span>
+    </a>
+    <nav class="nav__links" id="navLinks" aria-label="Navegación principal">
+      <a href="/">Inicio</a>
+      <a href="/#fabricamos">Productos</a>
+      <a href="/torneos">Torneos</a>
+      <a href="/#empresas">Empresas</a>
+      <a href="/#proceso">Cómo funciona</a>
+      <a href="/#contacto">Contacto</a>
+    </nav>
+    <a href="#" class="btn btn--primary nav__cta"
+       data-wa
+       data-wa-source="opiniones_nav"
+       data-wa-msg="Hola ORK3D &#x1F44B;&#10;Quiero cotizar un producto para mi evento o empresa.">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M20.52 3.48A11.83 11.83 0 0 0 12.05 0C5.5 0 .18 5.32.18 11.87c0 2.09.55 4.13 1.6 5.93L0 24l6.34-1.66a11.86 11.86 0 0 0 5.7 1.45h.01c6.55 0 11.87-5.32 11.87-11.87 0-3.17-1.23-6.15-3.4-8.44Z"/></svg>
+      Pedir presupuesto
+    </a>
+    <button class="nav__toggle" id="navToggle" aria-label="Abrir menú" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main class="opiniones">
+  <div class="container">
+    <header class="opiniones__head">
+      <p class="opiniones__kicker">Experiencias reales</p>
+      <h1>Opiniones de clientes</h1>
+      <p class="opiniones__lead">Reseñas de pedidos reales. Las revisamos antes de publicarlas, y nunca mostramos datos de contacto.</p>
+      <p class="opiniones__resumen" id="resenas-resumen" hidden></p>
+    </header>
+
+    <p class="opiniones__estado" id="resenas-estado" role="status" hidden></p>
+    <ul class="opiniones__lista" id="resenas-lista" aria-label="Opiniones publicadas" hidden></ul>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="container footer__inner">
+    <div class="footer__brand">
+      <a href="/"><span class="nav__logo-text">ORK<span class="accent">3D</span></span></a>
+      <p>Hecho en Buenos Aires.<br/>Diseñado para comunicar identidad.</p>
+    </div>
+    <div class="footer__links">
+      <a href="/#fabricamos">Productos</a>
+      <a href="/torneos">Para torneos</a>
+      <a href="/#empresas">Empresas</a>
+      <a href="/#proceso">Cómo funciona</a>
+    </div>
+    <div class="footer__social">
+      <a href="#" data-wa data-wa-source="generic" aria-label="WhatsApp">WhatsApp</a>
+      <a href="https://www.instagram.com/estudio.ork/" target="_blank" rel="noopener" aria-label="Instagram">Instagram</a>
+    </div>
+  </div>
+  <div class="footer__bottom">
+    <small>© <span id="year"></span> ORK3D · Buenos Aires, Argentina · <a href="/">Inicio</a></small>
+  </div>
+</footer>
+
+<script src="/config.js"></script>
+<script src="/assets/js/main.js?v=2"></script>
+<script src="/assets/js/resenas-publicas.js?v=1"></script>
+</body>
+</html>
