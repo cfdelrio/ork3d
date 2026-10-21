@@ -580,6 +580,24 @@ class Handler(unittest.TestCase):
         for secreto in [TOKEN, 'frase-unica-123', 'Gómez']:
             self.assertNotIn(secreto, registro)
 
+    def test_contrato_token_inexistente_responde_200_invalido(self):
+        # Validado en producción: GET de un token inexistente → HTTP 200 {"ok": false, "motivo": "invalido"}.
+        status, _, body = self.llamar('GET', '/tokens/' + 'A' * 32)
+        self.assertEqual((status, body), (200, {'ok': False, 'motivo': 'invalido'}))
+
+    def test_contrato_preflight_responde_204_con_origen_permitido(self):
+        # Validado en producción: OPTIONS /resenas → HTTP 204 con Access-Control-Allow-Origin del sitio.
+        status, cab, body = self.llamar('OPTIONS', '/resenas')
+        self.assertEqual((status, body), (204, None))
+        self.assertEqual(cab['Access-Control-Allow-Origin'], 'https://ork3d.com')
+
+    def test_error_de_permiso_en_s3_no_se_disfraza_de_token_invalido(self):
+        # Un AccessDenied de S3 es un problema de permisos, no un token inexistente: debe verse como error (500).
+        self.s3.fail_on('get_object', FakeClientError('AccessDenied', 403, 'Access Denied'), prefix='tokens/')
+        with self.assertLogs('resenas', 'INFO'):
+            status, _, body = self.llamar('GET', f'/tokens/{TOKEN}')
+        self.assertEqual((status, body), (500, {'ok': False, 'error': 'interno'}))
+
 
 if __name__ == '__main__':
     unittest.main()
