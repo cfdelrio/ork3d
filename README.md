@@ -1,6 +1,6 @@
 # ORK3D · Landing
 
-Landing estática de **ork3d.com** + **www.ork3d.com** (impresión 3D de trofeos, medallas, regalos corporativos y piezas personalizadas en Buenos Aires). Sin backend, sin DB, sin frameworks.
+Landing estática de **ork3d.com** + **www.ork3d.com** (impresión 3D de trofeos, medallas, regalos corporativos y piezas personalizadas en Buenos Aires). Sin frameworks. La landing es estática; solo las reseñas tienen backend: una Lambda y un bucket privado (ver `docs/resenas/README.md`).
 
 ```
 HTML + CSS + JS vanilla → S3 (privado) → CloudFront (OAC) → ork3d.com
@@ -17,6 +17,10 @@ HTML + CSS + JS vanilla → S3 (privado) → CloudFront (OAC) → ork3d.com
 .
 ├── index.html              # Landing
 ├── error.html              # Página 404
+├── opinar.html             # Reseña del cliente (/opinar/<token>): noindex, sin terceros
+├── api/resenas/            # Lambda de reseñas (app.py) y tests (no se despliega al sitio)
+├── admin/                  # CLI de moderación de reseñas (no se despliega)
+├── dev/                    # Servidor y E2E locales (no se despliega)
 ├── config.js               # WHATSAPP_NUMBER (variable)
 ├── assets/
 │   ├── css/styles.css
