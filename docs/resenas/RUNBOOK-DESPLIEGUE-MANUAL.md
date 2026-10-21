@@ -17,7 +17,7 @@ de CloudFront, el bucket del sitio, DNS, certificados, `config.js`, `main` ni la
 | Deploy GitHub Actions (run `39659217831`, #27: success) | ✔ COMPLETADO |
 | Smoke test productivo (sección 14) | ✔ COMPLETADO |
 | Flujo de foto: presign, JPEG y sin metadatos (sección 14.1) | ✔ COMPLETADO |
-| Uso único del token (sección 14.1) | ✔ COMPLETADO |
+| Consumo del token: `motivo=usado` tras el envío y después de la limpieza (sección 14.1) | ✔ COMPLETADO |
 | Moderación: pending, aprobación y CLI (sección 14.1) | ✔ COMPLETADO |
 | Export público y privacidad de campos (sección 14.1) | ✔ COMPLETADO |
 | Limpieza del smoke (sección 15.5) | ✔ COMPLETADO |
@@ -643,8 +643,8 @@ Solo la navegación a `/opinar/<token>` pasa por el DNS del sitio.
 
 ## 13. Atomicidad con If-None-Match (I): validada en S3 real (13.1). 13.2 pendiente
 
-Objetivo: confirmar contra S3 real que dos claims concurrentes sobre el mismo token dan **un solo éxito**, y que
-se crea **una sola reseña**. **13.1 quedó validada en S3 real.** **13.2 no se ejecutó**: crea datos reales en producción y requiere autorización explícita. El uso único secuencial del token sí quedó validado en el smoke productivo (sección 14.1).
+Objetivo: confirmar que dos escrituras concurrentes sobre el mismo claim dan **un solo éxito** (a nivel S3, 13.1), y que
+dos envíos concurrentes por API crean **una sola reseña** (a nivel HTTP, 13.2). **13.1 quedó validada en S3 real**: dos escrituras simultáneas con `If-None-Match: *` sobre la misma clave dieron exactamente una escritura exitosa y una `PreconditionFailed`. **13.2 no se ejecutó**: dos submits HTTP simultáneos contra `/resenas` crean datos reales en producción y requieren autorización explícita. El consumo del token (`motivo=usado` tras el envío) se verificó en el smoke productivo (sección 14.1).
 
 ### Requisitos
 
@@ -654,8 +654,9 @@ se crea **una sola reseña**. **13.1 quedó validada en S3 real.** **13.2 no se 
 
 ### 13.1 Primitiva S3 (sin reseñas): dos `put-object` con `--if-none-match`
 
-**Resultado real (S3 de producción):** dos `put-object` concurrentes con `--if-none-match '*'` sobre la misma clave dieron
-**un solo éxito**; el otro fue rechazado por la condición. Ver sección 17.2.
+**Resultado real (S3 de producción):** dos escrituras simultáneas con `--if-none-match '*'` sobre la misma clave produjeron
+exactamente una escritura exitosa y una `PreconditionFailed`. Esta es la primitiva de exclusión atómica validada contra AWS real.
+No se ejecutaron dos submits HTTP simultáneos contra `/resenas` (13.2). Ver sección 17.2.
 
 Antes, comprobá que tu versión de AWS CLI soporta el parámetro:
 
@@ -752,7 +753,7 @@ Después de validar, la limpieza de esta prueba va en la sección 15.5. Lo que q
 
 ## 14. Smoke test de cliente y moderación (COMPLETADO)
 
-Ejecutado desde EC2 después del deploy de `768eaa0` (run `39659217831`, #27: success). Pedido de prueba `SMOKE-TEST-ORK3D`, producto "Prueba técnica ORK3D", categoría `test`, con datos de prueba. Resultados reportados por el operador. No se documentan el token, su hash, la Function URL ni el ID de la reseña.
+Resultados de la ejecución y verificación operativa realizada desde el entorno EC2 de producción, después del deploy de `768eaa0` (run `39659217831`, #27: success). No es una reverificación desde otro entorno. Pedido de prueba `SMOKE-TEST-ORK3D`, producto "Prueba técnica ORK3D", categoría `test`, con datos de prueba. No se documentan el token, su hash, la Function URL ni el ID de la reseña.
 
 ### 14.1 Resultados
 
@@ -765,13 +766,13 @@ Ejecutado desde EC2 después del deploy de `768eaa0` (run `39659217831`, #27: su
 | 5 | Foto subida con presign | ✔ subida firmada correcta |
 | 6 | `POST /resenas` | ✔ HTTP 200 |
 | 7 | Pantalla de gracias | ✔ apareció, sin errores de consola |
-| 8 | Estado del token después del envío | ✔ `motivo=usado` |
+| 8 | Estado del token después del envío | ✔ `GET /tokens/<token>` devuelve `motivo=usado`. No se ejecutó un segundo `POST /resenas`: ni HTTP 409 ni el texto "Ya recibimos tu opinión" fueron verificados |
 | 9 | Reseña en `pending` | ✔ exactamente una. Rating 5, categoría `test`, `product_label` correcto, comentario y aspectos correctos, `display_name` generado, `private_feedback` solo interno, `permission_to_publish=true`, foto privada válida. El ID (32 caracteres) no se documenta |
 | 10 | Intentos fallidos con foto | ✔ dos objetos temporales en `pendientes/`, identificados por key exacta y eliminados sin tocar la foto asociada (sección 17.4, hallazgo A) |
 | 11 | Aprobación temporal | ✔ `approved`, `published_at` definido, `photo_public_key` creada, export regenerado, invalidación de CloudFront creada |
 | 12 | Export público (`resenas/publicas.json`) | ✔ items con la allowlist exacta (abajo) y sin campos privados |
 | 13 | Foto pública | ✔ HTTP 200, `Content-Type: image/jpeg`, tamaño correcto, `Cache-Control: public,max-age=31536000,immutable`, SHA-256 igual al de la foto privada, sin EXIF, XMP, IPTC ni GPS detectables |
-| 14 | Limpieza | ✔ reseña, foto privada y foto pública eliminadas; export regenerado; 0 `pending`; token consumido como evidencia de uso único y claim no eliminado (sección 15.5) |
+| 14 | Limpieza | ✔ reseña, foto privada y foto pública eliminadas; export regenerado; 0 `pending`. Estado de consumo del token preservado: una consulta posterior devolvió `ok=false`, `motivo=usado` (sección 15.5) |
 | 15 | Verificación final | ✔ foto pública del smoke: HTTP 404. Export: `count=0`, `items=[]`. `/opiniones`: `noindex, follow`. Sitemap: 0 referencias a opiniones. Home: 0 referencias a opiniones |
 | 16 | `/opiniones` sin lanzar | ✔ accesible por URL directa, con noindex, fuera del sitemap, sin enlaces y sin reseñas ficticias |
 | 17 | Recursos AWS | ✔ no se crearon recursos nuevos durante el smoke final |
@@ -798,7 +799,7 @@ Pasos y salidas esperadas:
 
    Cualquier otro campo (email, teléfono, `order_ref`, feedback privado, `contact_requested`, token, hash, clave de foto): **ERROR**. Parar.
 9. **Foto en AWS**: la reseña tiene `photo_key` en `pendientes/`. Antes de aprobar, esa foto **no** está en el sitio. Después de aprobar, la copia pública está en `resenas/fotos/<ID>.jpg` y la privada sigue en `pendientes/`. Verificá sin metadatos: la Lambda ya rechaza EXIF, XMP, IPTC y comentarios al subir; si quisieras confirmarlo, `aws s3 cp` a un archivo local y buscá `Exif` con `grep -c Exif`: esperado `0`.
-10. **Segundo envío**: reenviá el mismo link. Esperado: pantalla "Ya recibimos tu opinión" y ninguna reseña nueva.
+10. **Segundo envío**: reenviá el mismo link. Esperado: pantalla "Ya recibimos tu opinión" y ninguna reseña nueva. *En el smoke productivo este paso no se verificó: solo se verificó `motivo=usado` por GET (ver 14.1, fila 8).*
 11. **Limpieza**: sección 15.5.
 
 ---
@@ -941,11 +942,7 @@ Objetivo: no dejar reseñas de prueba publicadas, ni en el export, ni en version
    #   esperado: el count sin la reseña de prueba; "Prueba ORK3D" no aparece
    ```
 
-**Qué quedó en el smoke productivo (decisión registrada):** se borraron la reseña, la foto privada, la foto pública y los
-objetos temporales de intentos fallidos (sección 17.4). El export se regeneró y quedó con `count=0`. El token queda
-consumido como evidencia de uso único (estado `usado` para la API) y su claim no se eliminó. Esta decisión se aparta del
-default de este paso, que no conserva nada, y de la opción documentada, que pide dejar solo el claim con el registro del
-token borrado. Queda registrada aquí.
+**Qué quedó en el smoke productivo:** la reseña y sus fotos fueron eliminadas, mientras que el estado de consumo del token se preservó; una consulta posterior continuó devolviendo `motivo=usado`. Además se borraron los objetos temporales de intentos fallidos (sección 17.4), y el export se regeneró con `count=0`. No se inspeccionó a nivel S3 si el objeto de `tokens/` sigue existiendo o si el estado `usado` se resuelve solo mediante `claims/`: ese punto no está verificado.
 
 Los logs de CloudWatch quedan 30 días: contienen IDs y prefijos de hash, pero no tokens completos ni texto de reseñas.
 
@@ -1003,15 +1000,15 @@ script, en las políticas, en los tests o en este runbook. Los hallazgos del smo
 | --- | --- |
 | `GET /tokens/<token inexistente>` (sección 11) | `HTTP 200` con `{"ok": false, "motivo": "invalido"}`. No es 404 ni 500. |
 | `OPTIONS /resenas` con `Origin: https://ork3d.com` | `HTTP 204` con `access-control-allow-origin: https://ork3d.com`. CORS lo responde la Lambda: la Function URL no tiene CORS propio. |
-| Dos `put-object` con `--if-none-match '*'` sobre la misma clave (13.1) | **Un solo éxito.** El otro fue rechazado por la condición. Atomicidad confirmada. |
+| Dos escrituras simultáneas con `--if-none-match '*'` sobre la misma clave (13.1) | Una escritura exitosa y una `PreconditionFailed`. Exclusión atómica confirmada en S3 real. No son dos submits HTTP contra `/resenas`. |
 
 ### 17.3 Pendiente
 
-- **13.2**: prueba end-to-end de atomicidad con la API (dos envíos simultáneos). No se ejecutó: crea datos de producción y requiere autorización. El uso único secuencial sí quedó validado (sección 14.1).
-- **Sección 12**: si `ork3d.com` pasa por el proxy de Cloudflare, no está verificado.
+- **13.2**: dos submits HTTP simultáneos contra `/resenas`. No se ejecutaron: crean datos de producción y requieren autorización. La exclusión atómica en S3 sí está validada (13.1).
+- **Sección 12 (no bloqueante)**: si `ork3d.com` pasa por el proxy de Cloudflare, no está verificado. La arquitectura productiva validada usa S3 + CloudFront.
 - **Safari/iOS**: confirmar que el canvas no agrega metadatos.
 - **Límite por IP**: no implementado (`docs/resenas/README.md`, pendientes).
-- **Export**: relee todas las reseñas. Revisar antes de ~1.000 reseñas.
+- **Escala del export (consideración futura, no bloqueante)**: relee todas las reseñas. Con el volumen inicial no es un problema; conviene revisarla antes de ~1.000 reseñas.
 - **Script de infraestructura en macOS y bash 3.2**: no probado.
 
 ### 17.4 Hallazgos del smoke productivo

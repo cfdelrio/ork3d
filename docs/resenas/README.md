@@ -1,7 +1,7 @@
 # Reseñas de clientes · arquitectura, seguridad, costos y runbook
 
 Estado: **V1 completada en producción.** Infraestructura, `config.js`, merge a `main` y deploy (run `39659217831`, #27: success)
-están cerrados. El smoke productivo quedó validado de punta a punta (runbook, sección 14). **`/opiniones` sigue sin lanzar**:
+están cerrados. El smoke productivo se ejecutó y verificó desde el entorno EC2 de producción (runbook, sección 14). **`/opiniones` sigue sin lanzar**:
 existe por URL directa, con noindex, fuera del sitemap y sin enlaces desde home ni navegación. Lo que sigue abierto está en
 "Pendientes reales". El procedimiento y los hallazgos están en `docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md`.
 
@@ -14,7 +14,7 @@ existe por URL directa, con noindex, fuera del sitemap y sin enlaces desde home 
 | Deploy GitHub Actions (run `39659217831`, #27) | ✔ COMPLETADO |
 | Smoke test productivo | ✔ COMPLETADO |
 | Flujo de foto | ✔ COMPLETADO |
-| Uso único del token | ✔ COMPLETADO |
+| Consumo del token (`motivo=usado` tras el envío) | ✔ COMPLETADO |
 | Moderación | ✔ COMPLETADO |
 | Export público y privacidad | ✔ COMPLETADO |
 | Limpieza del smoke | ✔ COMPLETADO |
@@ -98,14 +98,14 @@ Cada fila dice qué se verificó y con qué. ✔ = verificado con test, E2E o va
 | EXIF eliminado | Tres capas: (1) el navegador recodifica en canvas: E2E con un canario EXIF en el original, y el objeto guardado no contiene `Exif`. (2) La Lambda rechaza cualquier segmento de metadatos y estructura rota: 14 casos de rechazo y 5 de aceptación en `JpegSinMetadatos`. (3) La CLI publica sin copiar a ciegas: `magick -strip` si está, y el JPEG ya validado. | ✔ en Chromium. ✖ Safari/iOS no probado. |
 | Sanitización de texto | Caracteres de control fuera; el HTML del cliente se muestra como texto (test y E2E con `<img onerror>`); la página pública y `/opinar` usan `textContent`. | ✔ |
 | Honeypot | Campo `website` oculto: la respuesta es 202 y no se guarda nada. Test y E2E. | ✔ |
-| Token de un solo uso | `claims/<hash>` con `IfNoneMatch='*'`. Test de carrera simulada, E2E de doble envío desde dos pestañas (la segunda recibe 409). Atomicidad validada en S3 real (runbook, 13.1). Uso único validado en producción (runbook, 14.1). | ✔ |
+| Token de un solo uso | `claims/<hash>` con `IfNoneMatch='*'`. Test de carrera simulada, E2E de doble envío desde dos pestañas (la segunda recibe 409). Atomicidad validada en S3 real (runbook, 13.1). Consumo verificado tras el envío productivo: `motivo=usado` (runbook, 14.1); segundo POST no ejecutado. | ✔ |
 | Token guardado solo como hash | Test: el token en claro no aparece en ninguna clave ni objeto. Vence a los 60 días y se puede revocar. | ✔ |
 | Rate limiting | Concurrencia reservada de 5 en la Lambda (`infra/resenas-setup.sh`). **No hay límite por IP** ni regla de WAF. | ◐ |
 | Bucket privado | Block Public Access total, versionado, cifrado SSE-S3, política que niega HTTP sin TLS. `validar.py` verifica la política. No se aplicó en AWS. | ◐ (solo dry-run) |
 | IAM mínimo privilegio | La Lambda lee `tokens/` y escribe solo `claims/`, `resenas/`, `pendientes/`. No puede escribir `tokens/`. Sin `s3:*` ni `Resource: "*"`. `validar.py` lo verifica. | ✔ (en el JSON) |
 
 **Lo que queda abierto de seguridad**
-- El token viaja en la ruta de la página y en la del API. Está protegido por el uso único, el vencimiento y la revocación. Pero si `ork3d.com` pasa por el proxy de Cloudflare, Cloudflare ve esas URLs. No está verificado desde el sandbox.
+- El token viaja en la ruta de la página y en la del API. Está protegido por el uso único, el vencimiento y la revocación. Pero si `ork3d.com` pasa por el proxy de Cloudflare, Cloudflare ve esas URLs. No verificado todavía.
 - No hay límite por IP. El tope es la concurrencia de 5, que acota el ritmo, no el total. Un atacante con muchos tokens válidos puede generar costo (ver costos).
 - La moderación manual es la única barrera contra fotos con personas o datos visibles. La Lambda y la CLI cubren metadatos, no contenido.
 
@@ -155,11 +155,11 @@ Procedimiento operativo completo (pre-flight, dry-run, ejecución real, verifica
 3. **Completado:** `config.js` apunta a la API desde `768eaa0`. El deploy corrió con el push a `main` (run `39659217831`).
 4. Asignar `infra/resenas/admin-permisos.json` al usuario que modera, reemplazando los placeholders.
 5. Configurar `admin/.env`. Ver `admin/README.md`.
-6. **Smoke test de cliente y moderación: completado** (runbook, sección 14). Cubrió token de prueba, envío desde navegador,
-   uso único, moderación, export, privacidad, foto y limpieza. La atomicidad de `IfNoneMatch` en S3 real está validada
-   (runbook, sección 13.1). El envío simultáneo con la API (13.2) no se ejecutó. La invocación pública funciona con los dos
-   permisos de la Function URL; ambos usan principal `*` porque la URL es pública, y la API sigue exigiendo un token válido
-   para escribir.
+6. **Smoke test de cliente y moderación: completado** (runbook, sección 14), ejecutado y verificado desde el entorno EC2 de
+   producción. Cubrió token de prueba, envío desde navegador, consumo del token (`motivo=usado`), moderación, export, privacidad,
+   foto y limpieza. La exclusión atómica de `IfNoneMatch` en S3 real está validada (runbook, sección 13.1). Dos envíos HTTP
+   simultáneos contra `/resenas` (13.2) no se ejecutaron. La invocación pública funciona con los dos permisos de la Function
+   URL; ambos usan principal `*` porque la URL es pública, y la API sigue exigiendo un token válido para escribir.
 
 ## Pruebas
 
@@ -186,12 +186,14 @@ un S3 en memoria. `dev/` está excluido del deploy.
 
 ## Pendientes reales
 
-Bloqueantes para producción:
-1. **Revisión de Cloudflare**: confirmar si `ork3d.com` usa el proxy. Si sí, decidir si las URLs con token pueden pasar por Cloudflare.
-2. ✔ **Smoke test de cliente y moderación**: completado (runbook, sección 14).
-3. **Safari/iOS**: confirmar que el canvas no agrega metadatos. Si los agregara, la foto de esos clientes se rechazaría.
-4. **Escala del export**: antes de ~1.000 reseñas, exportar por lotes o mantener un índice.
-5. **Decisión de producto**: texto del permiso de publicación y aviso de privacidad. Revisión legal pendiente.
+Pendientes (no cierran el smoke de la V1):
+1. **Safari/iOS**: confirmar que el canvas no agrega metadatos. Si los agregara, la foto de esos clientes se rechazaría.
+2. **Decisión de producto**: texto del permiso de publicación y aviso de privacidad. Revisión legal pendiente.
+3. **Validación de navegadores** adicional a Chromium (ver "No probado").
+
+Verificaciones y consideraciones no bloqueantes:
+4. **Cloudflare**: confirmar si `ork3d.com` pasa por el proxy. No es bloqueante: la arquitectura productiva validada usa S3 + CloudFront. Si pasa por el proxy, decidir si las URLs con token pueden pasar por Cloudflare.
+5. **Escala del export**: consideración futura de arquitectura. Con el volumen inicial no es bloqueante; antes de ~1.000 reseñas conviene exportar por lotes o mantener un índice.
 
 Decisiones de diseño abiertas:
 6. Fotos de Variedad para la home (pendiente desde antes de este trabajo, opciones 1 a 4).
@@ -204,4 +206,4 @@ No probado:
 11. Safari y Firefox en el navegador.
 12. `shellcheck` (no disponible en el sandbox; se validó sintaxis con `bash -n`).
 13. Validador HTML oficial (se usó un chequeo propio de etiquetas balanceadas).
-14. Concurrencia real: dos envíos simultáneos con un mismo token, vía API (runbook, 13.2). No ejecutado; el uso único secuencial sí está validado.
+14. Dos envíos HTTP simultáneos contra `/resenas` (runbook, 13.2): no ejecutado. La exclusión atómica en S3 sí está validada contra AWS real (13.1).
