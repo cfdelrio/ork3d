@@ -4,3 +4,4 @@ infra/.env
 node_modules/
 __pycache__/
 *.pyc
+dev/e2e/capturas/
