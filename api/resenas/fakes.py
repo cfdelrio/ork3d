@@ -35,9 +35,18 @@ class _Body:
 class FakeS3:
     def __init__(self):
         self.objects = {}    # clave -> bytes
+        self.metadatos = {}  # clave -> {'ContentType', 'CacheControl'}
         self.presigned = {}  # clave -> {'fields', 'conditions', 'expires_in'}
         self.calls = []      # [(operación, clave)]
+        self.escrituras = [] # [(bucket, clave)] de cada put_object que se aplicó
+        self.borrados = []   # [(bucket, clave)] de cada delete_object
         self._fallos = []    # [(operación, prefijo, excepción)]
+
+    @staticmethod
+    def etag(datos):
+        """ETag como S3: MD5 entre comillas. Cambia con cada contenido nuevo."""
+        import hashlib
+        return '"' + hashlib.md5(datos).hexdigest() + '"'
 
     def fail_on(self, operacion, exc, prefix=''):
         """La próxima llamada a `operacion` sobre claves con ese prefijo lanza `exc`."""
@@ -50,21 +59,32 @@ class FakeS3:
                 del self._fallos[i]
                 raise exc
 
-    def put_object(self, Bucket, Key, Body=b'', ContentType=None, IfNoneMatch=None, **_):
+    def put_object(self, Bucket, Key, Body=b'', ContentType=None, IfNoneMatch=None,
+                   IfMatch=None, CacheControl=None, **_):
         self._registrar('put_object', Key)
         if IfNoneMatch not in (None, '*'):
             raise NotImplementedError('el fake solo modela IfNoneMatch="*"')
         if IfNoneMatch == '*' and Key in self.objects:
             raise FakeClientError('PreconditionFailed', 412,
                                   'At least one of the pre-conditions you specified did not hold')
-        self.objects[Key] = Body.encode('utf-8') if isinstance(Body, str) else bytes(Body)
-        return {}
+        if IfMatch is not None:
+            # If-Match: solo escribe si el objeto existe y su ETag es el esperado.
+            if Key not in self.objects:
+                raise FakeClientError('PreconditionFailed', 412, 'If-Match: la clave no existe')
+            if self.etag(self.objects[Key]) != IfMatch:
+                raise FakeClientError('PreconditionFailed', 412, 'If-Match: el ETag no coincide')
+        datos = Body.encode('utf-8') if isinstance(Body, str) else bytes(Body)
+        self.objects[Key] = datos
+        self.metadatos[Key] = {'ContentType': ContentType, 'CacheControl': CacheControl}
+        self.escrituras.append((Bucket, Key))
+        return {'ETag': self.etag(datos)}
 
     def get_object(self, Bucket, Key, Range=None, **_):
         self._registrar('get_object', Key)
         if Key not in self.objects:
             raise FakeClientError('NoSuchKey', 404, 'The specified key does not exist.')
         datos = self.objects[Key]
+        etag = self.etag(datos)
         if Range is not None:
             m = _RANGO.fullmatch(Range)
             if m is None:
@@ -73,19 +93,27 @@ class FakeS3:
             if inicio >= len(datos):
                 raise FakeClientError('InvalidRange', 416, 'The requested range is not satisfiable')
             datos = datos[inicio:int(m.group(2)) + 1]
-        return {'Body': _Body(datos), 'ContentLength': len(datos)}
+        return {'Body': _Body(datos), 'ContentLength': len(datos), 'ETag': etag}
 
     def head_object(self, Bucket, Key, **_):
         self._registrar('head_object', Key)
         if Key not in self.objects:
             # Un HEAD no trae cuerpo: botocore lo reporta con código "404", no NoSuchKey.
             raise FakeClientError('404', 404, 'Not Found')
-        return {'ContentLength': len(self.objects[Key])}
+        return {'ContentLength': len(self.objects[Key]), 'ETag': self.etag(self.objects[Key])}
 
     def delete_object(self, Bucket, Key, **_):
         self._registrar('delete_object', Key)
         self.objects.pop(Key, None)
+        self.metadatos.pop(Key, None)
+        self.borrados.append((Bucket, Key))
         return {}
+
+    def list_objects_v2(self, Bucket, Prefix='', ContinuationToken=None, **_):
+        """Una sola página, ordenada por clave (basta para los tests)."""
+        claves = sorted(k for k in self.objects if k.startswith(Prefix or ''))
+        return {'Contents': [{'Key': k} for k in claves], 'KeyCount': len(claves),
+                'IsTruncated': False}
 
     def generate_presigned_post(self, Bucket, Key, Fields=None, Conditions=None, ExpiresIn=3600):
         self._registrar('presign', Key)
@@ -117,6 +145,44 @@ class FakeS3:
                 raise NotImplementedError(f'condición no modelada: {cond!r}')
         self.objects[clave] = bytes(cuerpo)
         self.calls.append(('browser_post', clave))
+
+
+class FakeSES:
+    """Doble de SES: guarda los correos enviados. Puede fallar la próxima llamada a propósito.
+
+    Implementa la misma interfaz que nucleo.correo.ServicioCorreo (enviar).
+    """
+
+    def __init__(self):
+        self.enviados = []   # [{'from', 'to', 'subject', 'text', 'html'}]
+        self._fallos = []
+
+    def fallar_proximo(self, exc=None):
+        self._fallos.append(exc or FakeClientError('MessageRejected', 400, 'Email address not verified.'))
+
+    def enviar(self, correo):
+        if self._fallos:
+            raise self._fallos.pop(0)
+        self.enviados.append({'from': correo.origen, 'to': correo.destino,
+                              'subject': correo.asunto, 'text': correo.texto, 'html': correo.html})
+        return f'msg-{len(self.enviados)}'
+
+
+class FakeCloudFront:
+    """Doble de CloudFront: registra las invalidaciones. Puede fallar a propósito."""
+
+    def __init__(self):
+        self.invalidaciones = []  # [[rutas], ...]
+        self._fallos = []
+
+    def fallar_proximo(self, exc=None):
+        self._fallos.append(exc or FakeClientError('ServiceUnavailable', 503, 'CloudFront no disponible'))
+
+    def invalidar(self, rutas):
+        if self._fallos:
+            raise self._fallos.pop(0)
+        self.invalidaciones.append(list(rutas))
+        return f'inv-{len(self.invalidaciones)}'
 
 
 def segmento(marcador, cuerpo):
