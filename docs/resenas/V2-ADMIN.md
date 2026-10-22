@@ -462,7 +462,9 @@ Regla implementada en `assets/js/admin-comun.js`, función `llamar()`:
 - Política de caché: `CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`). No hay caché, y la política de
   caché no decide qué se reenvía al origen.
 - Política de origen propia: `ork3d-resenas-admin-orp` (`infra/resenas/admin-origin-request-policy.json`).
-  - Headers (whitelist): `Content-Type`, `Origin`, `X-Admin-Request`, `x-amz-content-sha256`.
+  - Headers (allExcept, excluye solo `Host`): todas las cabeceras del viewer llegan al origen, incluido
+    `x-amz-content-sha256`. La política no la declara: una cabecera x-amz-* listada en la política fue rechazada
+    por CloudFront en la primera ejecución real. El cliente sigue enviando el hash en cada POST con body.
   - Cookies (whitelist): `ork3d_admin`. Ninguna otra cookie llega al origen.
   - Query (whitelist): `estado`.
   - `Host` no se reenvía: la Function URL necesita su propio host.

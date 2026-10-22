@@ -10,6 +10,8 @@ Variables de entorno:
   FAKE_LOG             registro de llamadas
   FAKE_ROL_TARDE=N     create-function falla N veces con InvalidParameterValueException (rol aún no asumible)
   FAKE_DIST_LENTO=N    tras update-distribution, get-distribution responde InProgress N veces
+  FAKE_ORP_RECHAZO=1   create-origin-request-policy siempre falla con un mensaje con datos sensibles
+  (create-origin-request-policy también rechaza cabeceras x-amz-* en Headers.Items, como la primera prueba real)
 """
 import base64
 import copy
@@ -349,6 +351,15 @@ def despachar(svc, op, o, pos, st):
 
     if (svc, op) == ('cloudfront', 'create-origin-request-policy'):
         cfg = json.loads(leer_archivo(o['origin-request-policy-config']))
+        if os.environ.get('FAKE_ORP_RECHAZO') == '1':
+            # Mensaje con datos que jamás deben llegar al registro: correo, cuenta, clave y URL firmada.
+            cuenta, clave = '9' * 12, 'AKIA' + 'FAKE' * 4  # datos falsos, armados por partes
+            raise Fallo('InvalidArgument', 'Policy rejected for ana.moderadora@example.com account ' + cuenta +
+                        ' key ' + clave + ' see https://h.example/x?X-Amz-Signature=abc', op)
+        # Lo que el servicio rechazó en la primera prueba real: cabeceras x-amz-* listadas en Headers.Items.
+        for item in cfg.get('HeadersConfig', {}).get('Headers', {}).get('Items', []):
+            if item.lower().startswith('x-amz-'):
+                raise Fallo('InvalidArgument', f'Invalid header in HeadersConfig: {item}', op)
         if any(p['config']['Name'] == cfg['Name'] for p in st['orps']):
             raise Fallo('OriginRequestPolicyAlreadyExists', 'exists', op)
         pid = 'ORP' + uuid.uuid4().hex[:10].upper()
@@ -387,7 +398,8 @@ def main():
         resultado = despachar(svc, op, o, pos, st)
     except Fallo as exc:
         guardar(ruta, st)
-        sys.stderr.write(f'An error occurred ({exc.codigo}) when calling the {op} operation: {exc.msg}\n')
+        nombre_api = ''.join(p.capitalize() for p in op.replace('wait:', '').split('-'))  # como la CLI real
+        sys.stderr.write(f'An error occurred ({exc.codigo}) when calling the {nombre_api} operation: {exc.msg}\n')
         sys.exit(255)
     guardar(ruta, st)
     if resultado is not None:

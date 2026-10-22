@@ -72,6 +72,7 @@ trap 'rm -rf "$T"' EXIT
 
 fallo()    { echo "ERROR: $*" >&2; exit 1; }
 distinto() { echo "ERROR: $*" >&2; exit 4; }
+detalle()  { python3 "$AYUDA" detalle "$1"; }   # código, operación y mensaje de la CLI, sanitizados
 codigo()   { python3 -c 'import re, sys; m = re.search(r"An error occurred \((\w+)\)", open(sys.argv[1], encoding="utf-8", errors="replace").read()); print(m.group(1) if m else "desconocido")' "$1"; }
 valor()    { python3 "$AYUDA" get "$1" "$2"; }
 enmascarar() { python3 "$AYUDA" mascarar "$1"; }
@@ -89,7 +90,7 @@ guardar_rollback() {  # NOMBRE ARCHIVO: copia nueva con la marca de la ejecució
 identidad_ok() {  # CORREO ROL: EMAIL_ADDRESS verificada y habilitada para enviar
   local correo="$1" rol="$2"
   if ! "$AWS" sesv2 get-email-identity --email-identity "$correo" --output json > "$T/$rol-id.json" 2> "$T/$rol-id.err"; then
-    fallo "$rol: no es una identidad SES en $AWS_REGION (código $(codigo "$T/$rol-id.err"))"
+    fallo "$rol: no es una identidad SES en $AWS_REGION (código $(detalle "$T/$rol-id.err"))"
   fi
   [[ "$(valor "$T/$rol-id.json" IdentityType)" == EMAIL_ADDRESS ]] || fallo "$rol: debe ser EMAIL_ADDRESS"
   [[ "$(valor "$T/$rol-id.json" VerificationStatus)" == SUCCESS ]] || fallo "$rol: no está verificada"
@@ -118,7 +119,7 @@ echo "  HEAD ${HEAD_LOCAL:0:7} · $RAMA · árbol limpio · remoto = local"
 # ── 2. Identidad AWS ──────────────────────────────────────────────────────────────────────
 paso "2. Identidad AWS"
 "$AWS" sts get-caller-identity --output json > "$T/id.json" 2> "$T/id.err" \
-  || fallo "no se pudo autenticar con el perfil $AWS_PROFILE (código $(codigo "$T/id.err"))"
+  || fallo "no se pudo autenticar con el perfil $AWS_PROFILE (código $(detalle "$T/id.err"))"
 CUENTA="$(valor "$T/id.json" Account)"
 [[ -n "$CUENTA" ]] || fallo "sts no devolvió la cuenta"
 echo "  cuenta ****${CUENTA: -4} · perfil=$AWS_PROFILE · región=$AWS_REGION"
@@ -128,7 +129,7 @@ DIST_ARN="arn:aws:cloudfront::$CUENTA:distribution/$DIST"
 # ── 3. Lambda pública (solo lectura): de aquí sale RESENAS_BUCKET, en memoria ─────────────
 paso "3. Lambda pública (solo lectura)"
 "$AWS" lambda get-function-configuration --function-name "$FN_PUBLICA" --output json > "$T/pub.json" 2> "$T/pub.err" \
-  || fallo "no se pudo leer $FN_PUBLICA (código $(codigo "$T/pub.err"))"
+  || fallo "no se pudo leer $FN_PUBLICA (código $(detalle "$T/pub.err"))"
 [[ "$(valor "$T/pub.json" State)" == Active ]] || fallo "$FN_PUBLICA no está Active"
 [[ "$(valor "$T/pub.json" LastUpdateStatus)" == Successful ]] || fallo "$FN_PUBLICA no tiene LastUpdateStatus Successful"
 RESENAS_BUCKET="$(python3 "$AYUDA" bucket-privado "$T/pub.json")"
@@ -190,7 +191,7 @@ PY
 guardar_rollback iam-rol-publico.json "$T/rolpub-completo.json"
 
 "$AWS" cloudfront get-distribution --id "$DIST" --output json > "$T/dist.json" 2> "$T/d.err" \
-  || fallo "no se pudo leer la distribución $DIST (código $(codigo "$T/d.err"))"
+  || fallo "no se pudo leer la distribución $DIST (código $(detalle "$T/d.err"))"
 [[ "$(valor "$T/dist.json" Distribution.Status)" == Deployed ]] || fallo "la distribución $DIST no está Deployed"
 [[ ",$(valor "$T/dist.json" Distribution.DistributionConfig.Aliases.Items)," == *",$SITIO,"* ]] \
   || fallo "la distribución $DIST no tiene el alias $SITIO"
@@ -202,14 +203,14 @@ ETAG="$(valor "$T/dist-config.json" ETag)"
 guardar_rollback cloudfront-distribucion-config.json "$T/dist-config.json"
 
 "$AWS" cloudfront describe-function --name "$FN_REDIRECT" --stage LIVE --output json > "$T/fn-meta.json" 2> "$T/fm.err" \
-  || fallo "no se pudo leer la función $FN_REDIRECT (código $(codigo "$T/fm.err"))"
+  || fallo "no se pudo leer la función $FN_REDIRECT (código $(detalle "$T/fm.err"))"
 guardar_rollback cloudfront-funcion-redirect-meta.json "$T/fn-meta.json"
 "$AWS" cloudfront get-function --name "$FN_REDIRECT" --stage LIVE --output json "$T/fn-live.js" > /dev/null 2> "$T/fg.err" \
   || fallo "no se pudo leer el código LIVE de $FN_REDIRECT"
 guardar_rollback cloudfront-funcion-redirect-LIVE.js "$T/fn-live.js"
 
 "$AWS" s3api head-bucket --bucket "$RESENAS_BUCKET" 2> "$T/hb.err" \
-  || fallo "el bucket privado no existe o no es accesible (código $(codigo "$T/hb.err"))"
+  || fallo "el bucket privado no existe o no es accesible (código $(detalle "$T/hb.err"))"
 if "$AWS" s3api get-bucket-lifecycle-configuration --bucket "$RESENAS_BUCKET" --output json > "$T/lc.json" 2> "$T/lc.err"; then
   :
 else
@@ -281,7 +282,7 @@ if "$AWS" iam get-role --role-name "$ROL" --output json > "$T/rol.json" 2> "$T/r
   esac
   echo "  rol $ROL: existe y coincide (trust, políticas adjuntas e inline)"
 else
-  [[ "$(codigo "$T/rol.err")" == NoSuchEntity ]] || fallo "no se pudo leer el rol $ROL (código $(codigo "$T/rol.err"))"
+  [[ "$(codigo "$T/rol.err")" == NoSuchEntity ]] || fallo "no se pudo leer el rol $ROL (código $(detalle "$T/rol.err"))"
   echo "  rol $ROL: no existe"
 fi
 
@@ -293,7 +294,7 @@ if "$AWS" lambda get-function-configuration --function-name "$FN_ADMIN" --output
     || distinto "la Lambda $FN_ADMIN existe y no coincide con el repo (motivos arriba)"
   echo "  Lambda $FN_ADMIN: existe y coincide (idempotente)"
 else
-  [[ "$(codigo "$T/admin.err")" == ResourceNotFoundException ]] || fallo "no se pudo leer $FN_ADMIN (código $(codigo "$T/admin.err"))"
+  [[ "$(codigo "$T/admin.err")" == ResourceNotFoundException ]] || fallo "no se pudo leer $FN_ADMIN (código $(detalle "$T/admin.err"))"
   echo "  Lambda $FN_ADMIN: no existe"
 fi
 
@@ -364,26 +365,26 @@ echo "  no se toca: default behavior, origen S3, /opinar, /opiniones, Lambda pú
 paso "9. Escrituras"
 
 if [[ $LOG_EXISTE == no ]]; then
-  "$AWS" logs create-log-group --log-group-name "$LOG_GRUPO" 2> "$T/lg.err" || fallo "create-log-group ($(codigo "$T/lg.err"))"
+  "$AWS" logs create-log-group --log-group-name "$LOG_GRUPO" 2> "$T/lg.err" || fallo "create-log-group ($(detalle "$T/lg.err"))"
   "$AWS" logs put-retention-policy --log-group-name "$LOG_GRUPO" --retention-in-days 30 2> "$T/lr.err" \
-    || fallo "put-retention-policy ($(codigo "$T/lr.err"))"
+    || fallo "put-retention-policy ($(detalle "$T/lr.err"))"
   echo "  log group creado (30 días)"
 fi
 
 if [[ $ROL_EXISTE == no ]]; then
   "$AWS" iam create-role --role-name "$ROL" --assume-role-policy-document "file://$ROOT/infra/resenas/lambda-trust.json" \
-    --output json > /dev/null 2> "$T/cr.err" || fallo "create-role ($(codigo "$T/cr.err"))"
+    --output json > /dev/null 2> "$T/cr.err" || fallo "create-role ($(detalle "$T/cr.err"))"
   echo "  rol $ROL creado"
   ROL_NUEVO=si
 fi
 if [[ $ADJ_OK == falta ]]; then
   "$AWS" iam attach-role-policy --role-name "$ROL" --policy-arn "$BASICA_ARN" 2> "$T/at.err" \
-    || fallo "attach-role-policy ($(codigo "$T/at.err"))"
+    || fallo "attach-role-policy ($(detalle "$T/at.err"))"
   echo "  AWSLambdaBasicExecutionRole adjuntada"
 fi
 if [[ $POL_EXISTE == no ]]; then
   "$AWS" iam put-role-policy --role-name "$ROL" --policy-name "$POLITICA_ROL" \
-    --policy-document "file://$T/politica-admin.json" 2> "$T/pp2.err" || fallo "put-role-policy ($(codigo "$T/pp2.err"))"
+    --policy-document "file://$T/politica-admin.json" 2> "$T/pp2.err" || fallo "put-role-policy ($(detalle "$T/pp2.err"))"
   echo "  política $POLITICA_ROL aplicada"
 fi
 if [[ "${ROL_NUEVO:-no}" == si ]]; then
@@ -400,13 +401,13 @@ if [[ $LAMBDA_EXISTE == no ]]; then
       --environment "file://$T/env.json" --output json > "$T/create.json" 2> "$T/create.err"; do
     intentos=$((intentos + 1))
     if [[ $intentos -ge 6 || "$(codigo "$T/create.err")" != InvalidParameterValueException ]]; then
-      fallo "create-function ($(codigo "$T/create.err"))"
+      fallo "create-function ($(detalle "$T/create.err"))"
     fi
     echo "  el rol todavía no es asumible; reintento $intentos/5"
     sleep "$ESPERA"
   done
   "$AWS" lambda wait function-active-v2 --function-name "$FN_ADMIN" 2> "$T/w.err" \
-    || fallo "$FN_ADMIN no llegó a Active ($(codigo "$T/w.err"))"
+    || fallo "$FN_ADMIN no llegó a Active ($(detalle "$T/w.err"))"
   "$AWS" lambda get-function-configuration --function-name "$FN_ADMIN" --output json > "$T/admin.json" 2> /dev/null \
     || fallo "no se pudo releer $FN_ADMIN"
   python3 "$AYUDA" lambda-coincide "$T/admin.json" "$SHA" "$T/env.json" || fallo "$FN_ADMIN creada no coincide con lo esperado"
@@ -421,7 +422,7 @@ echo "CHECKPOINT 3 — Lambda admin OK"
 
 if [[ $URL_EXISTE == no ]]; then
   "$AWS" lambda create-function-url-config --function-name "$FN_ADMIN" --auth-type AWS_IAM --output json \
-    > "$T/url.json" 2> "$T/u.err" || fallo "create-function-url-config ($(codigo "$T/u.err"))"
+    > "$T/url.json" 2> "$T/u.err" || fallo "create-function-url-config ($(detalle "$T/u.err"))"
   echo "  Function URL creada (AWS_IAM)"
 fi
 URL="$(valor "$T/url.json" FunctionUrl)"
@@ -431,10 +432,10 @@ HOST="$(python3 -c 'import sys; from urllib.parse import urlparse; print(urlpars
 if [[ $PERM == ninguno ]]; then
   "$AWS" lambda add-permission --function-name "$FN_ADMIN" --statement-id "$SID_URL" --action lambda:InvokeFunctionUrl \
     --principal cloudfront.amazonaws.com --source-arn "$DIST_ARN" --function-url-auth-type AWS_IAM \
-    --output json > /dev/null 2> "$T/p1.err" || fallo "add-permission InvokeFunctionUrl ($(codigo "$T/p1.err"))"
+    --output json > /dev/null 2> "$T/p1.err" || fallo "add-permission InvokeFunctionUrl ($(detalle "$T/p1.err"))"
   "$AWS" lambda add-permission --function-name "$FN_ADMIN" --statement-id "$SID_INVOCA" --action lambda:InvokeFunction \
     --principal cloudfront.amazonaws.com --source-arn "$DIST_ARN" --invoked-via-function-url \
-    --output json > /dev/null 2> "$T/p2.err" || fallo "add-permission InvokeFunction ($(codigo "$T/p2.err"))"
+    --output json > /dev/null 2> "$T/p2.err" || fallo "add-permission InvokeFunction ($(detalle "$T/p2.err"))"
   echo "  dos permisos de CloudFront agregados"
 fi
 "$AWS" lambda get-policy --function-name "$FN_ADMIN" --output json > "$T/admin-policy2.json" 2> "$T/ap2.err" \
@@ -448,7 +449,7 @@ if [[ $OAC_EXISTE == no ]]; then
 {"Name": "$OAC_NOMBRE", "Description": "OAC de la API admin V2 (Lambda Function URL)", "SigningProtocol": "sigv4", "SigningBehavior": "always", "OriginAccessControlOriginType": "lambda"}
 JSON
   "$AWS" cloudfront create-origin-access-control --origin-access-control-config "file://$T/oac.json" --output json \
-    > "$T/oac-create.json" 2> "$T/oc.err" || fallo "create-origin-access-control ($(codigo "$T/oc.err"))"
+    > "$T/oac-create.json" 2> "$T/oc.err" || fallo "create-origin-access-control ($(detalle "$T/oc.err"))"
   OAC_ID="$(valor "$T/oac-create.json" OriginAccessControl.Id)"
   echo "  OAC creado: $OAC_ID"
 fi
@@ -456,7 +457,7 @@ fi
 if [[ $ORP_EXISTE == no ]]; then
   "$AWS" cloudfront create-origin-request-policy \
     --origin-request-policy-config "file://$ROOT/infra/resenas/admin-origin-request-policy.json" \
-    --output json > "$T/orp-create.json" 2> "$T/orc.err" || fallo "create-origin-request-policy ($(codigo "$T/orc.err"))"
+    --output json > "$T/orp-create.json" 2> "$T/orc.err" || fallo "create-origin-request-policy ($(detalle "$T/orc.err"))"
   ORP_ID="$(valor "$T/orp-create.json" OriginRequestPolicy.Id)"
   echo "  origin request policy creada: $ORP_ID"
 fi
@@ -476,7 +477,7 @@ if [[ $ORIGEN_ADMIN_EXISTE == no || $BEH_EXISTE == no ]]; then
   esac
   "$AWS" cloudfront update-distribution --id "$DIST" --if-match "$ETAG" \
     --distribution-config "file://$T/dist-nueva.json" --output json > "$T/du.json" 2> "$T/du.err" \
-    || fallo "update-distribution ($(codigo "$T/du.err"))"
+    || fallo "update-distribution ($(detalle "$T/du.err"))"
   echo "  update-distribution enviado (If-Match ${ETAG:0:8}…)"
   for _ in $(seq 1 60); do
     "$AWS" cloudfront get-distribution --id "$DIST" --output json > "$T/dist-poll.json" 2> /dev/null \

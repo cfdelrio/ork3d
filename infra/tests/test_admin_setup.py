@@ -368,12 +368,21 @@ def permisos_oac_faltantes(salida):
 
 
 def reenvio_faltante(orp):
-    """Lo que la API necesita y la política de origen no reenvía: cabeceras de mutación, hash y cookie de sesión."""
+    """Lo que la API necesita y la política de origen no reenvía: cabeceras de mutación, hash y cookie de sesión.
+
+    Con allExcept, Headers.Items son las cabeceras EXCLUIDAS: una cabecera requerida que aparezca ahí no llega al origen.
+    """
     faltan = set()
-    items = [h.lower() for h in orp.get('HeadersConfig', {}).get('Headers', {}).get('Items', [])]
-    for requerida in CABECERAS_REQUERIDAS:
-        if requerida not in items:
-            faltan.add(requerida)
+    cabeceras = orp.get('HeadersConfig', {})
+    items = [h.lower() for h in cabeceras.get('Headers', {}).get('Items', [])]
+    if cabeceras.get('HeaderBehavior') == 'allExcept':
+        for requerida in CABECERAS_REQUERIDAS:
+            if requerida in items:
+                faltan.add(requerida)
+    else:
+        for requerida in CABECERAS_REQUERIDAS:
+            if requerida not in items:
+                faltan.add(requerida)
     if 'ork3d_admin' not in orp.get('CookiesConfig', {}).get('Cookies', {}).get('Items', []):
         faltan.add('cookie:ork3d_admin')
     return faltan
@@ -428,23 +437,24 @@ class PermisosOACyReenvio(HarnessPlan):
         self.assertLess(salida.index('aws cloudfront create-origin-request-policy'), salida.index('aws cloudfront update-distribution'))
         self.assertIn('__ADMIN_ORP_ID__', salida)
 
-    def test_politica_de_origen_reenvia_solo_lo_que_usa_la_api(self):
+    def test_politica_de_origen_reenvia_todo_salvo_host_y_restringe_cookies_y_query(self):
         orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
         self.assertEqual(reenvio_faltante(orp), set())
-        items = [h.lower() for h in orp['HeadersConfig']['Headers']['Items']]
-        self.assertEqual(orp['HeadersConfig']['HeaderBehavior'], 'whitelist')
-        self.assertEqual(orp['HeadersConfig']['Headers']['Quantity'], len(items))
-        self.assertNotIn('host', items)
+        self.assertEqual(orp['HeadersConfig']['HeaderBehavior'], 'allExcept')
+        self.assertEqual(orp['HeadersConfig']['Headers'], {'Quantity': 1, 'Items': ['Host']})
         self.assertEqual(orp['CookiesConfig'], {'CookieBehavior': 'whitelist', 'Cookies': {'Quantity': 1, 'Items': ['ork3d_admin']}})
         self.assertEqual(orp['QueryStringsConfig'], {'QueryStringBehavior': 'whitelist', 'QueryStrings': {'Quantity': 1, 'Items': ['estado']}})
         self.assertNotIn('_estado', orp, 'el archivo se pasa tal cual a la CLI: sin claves extra')
 
+    def test_politica_de_origen_no_declara_cabeceras_x_amz(self):
+        orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
+        self.assertFalse([h for h in orp['HeadersConfig']['Headers']['Items'] if h.lower().startswith('x-amz-')])
+
     def test_falta_el_hash_o_la_cookie_en_la_politica_hace_fallar(self):
         orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
-        sin_hash = json.loads(json.dumps(orp))
-        sin_hash['HeadersConfig']['Headers']['Items'].remove('x-amz-content-sha256')
-        sin_hash['HeadersConfig']['Headers']['Quantity'] -= 1
-        self.assertEqual(reenvio_faltante(sin_hash), {'x-amz-content-sha256'})
+        excluye_hash = json.loads(json.dumps(orp))
+        excluye_hash['HeadersConfig']['Headers'] = {'Quantity': 2, 'Items': ['Host', 'x-amz-content-sha256']}
+        self.assertEqual(reenvio_faltante(excluye_hash), {'x-amz-content-sha256'})
         sin_cookie = json.loads(json.dumps(orp))
         sin_cookie['CookiesConfig']['Cookies']['Items'] = []
         sin_cookie['CookiesConfig']['Cookies']['Quantity'] = 0

@@ -285,12 +285,16 @@ def validar_admin_v2():
                 and 'distribution/__DISTRIBUTION_ID__' in json.dumps(st.get('Condition', {}))}
     comprobar('Admin OAC: la especificación concede InvokeFunctionUrl e InvokeFunction a cloudfront.amazonaws.com por SourceArn',
               conceden == {'lambda:InvokeFunctionUrl', 'lambda:InvokeFunction'}, str(sorted(conceden)))
-    # Forwarding de CloudFront: x-amz-content-sha256 y la cookie de sesión llegan al origen; nada de Host.
+    # Forwarding de CloudFront: todas las cabeceras del viewer salvo Host (allExcept); sin declarar x-amz-*;
+    # cookie ork3d_admin y query estado solamente.
     orp = json.loads(leer('infra/resenas/admin-origin-request-policy.json'))
-    cabeceras = [h.lower() for h in orp['HeadersConfig']['Headers']['Items']]
-    comprobar('Admin CloudFront: la política de origen reenvía x-amz-content-sha256, la cookie ork3d_admin y no reenvía Host',
-              'x-amz-content-sha256' in cabeceras and orp['CookiesConfig']['Cookies']['Items'] == ['ork3d_admin']
-              and 'host' not in cabeceras)
+    cabeceras = orp['HeadersConfig']
+    comprobar('Admin CloudFront: la política de origen usa allExcept excluyendo solo Host, sin cabeceras x-amz-*',
+              cabeceras['HeaderBehavior'] == 'allExcept' and cabeceras['Headers']['Items'] == ['Host']
+              and not [h for h in cabeceras['Headers']['Items'] if h.lower().startswith('x-amz-')])
+    comprobar('Admin CloudFront: cookies solo ork3d_admin y query solo estado',
+              orp['CookiesConfig']['Cookies']['Items'] == ['ork3d_admin']
+              and orp['QueryStringsConfig']['QueryStrings']['Items'] == ['estado'])
 
 
 # ── Preflight y smoke de V2 (EC2): el preflight solo lee; el smoke es el único escritor y pide permiso ──

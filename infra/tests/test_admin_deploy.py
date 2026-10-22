@@ -58,6 +58,12 @@ class DespliegueTest(unittest.TestCase):
         if os.path.exists(self.log):
             os.remove(self.log)
 
+    def modificar_estado(self, cambios):
+        st = self.estado_actual()
+        cambios(st)
+        with open(self.estado, 'w', encoding='utf-8') as f:
+            json.dump(st, f)
+
     def estado_actual(self):
         with open(self.estado, encoding='utf-8') as f:
             return json.load(f)
@@ -262,11 +268,10 @@ class CaminoFelizTest(DespliegueTest):
         self.assertEqual(len(st['orps']), 1)
         orp = st['orps'][0]['config']
         self.assertEqual(orp['Name'], 'ork3d-resenas-admin-orp')
-        self.assertEqual(orp['HeadersConfig']['Headers']['Items'],
-                         ['Content-Type', 'Origin', 'X-Admin-Request', 'x-amz-content-sha256'])
+        self.assertEqual(orp['HeadersConfig']['HeaderBehavior'], 'allExcept')
+        self.assertEqual(orp['HeadersConfig']['Headers']['Items'], ['Host'])
         self.assertEqual(orp['CookiesConfig']['Cookies']['Items'], ['ork3d_admin'])
         self.assertEqual(orp['QueryStringsConfig']['QueryStrings']['Items'], ['estado'])
-        self.assertNotIn('Host', orp['HeadersConfig']['Headers']['Items'])
 
         self.assertNotEqual(st['dist']['etag'], antes['dist']['etag'])
         self.assertEqual(st['dist']['estado'], 'Deployed')
@@ -567,6 +572,97 @@ class SmokeMagicTest(DespliegueTest):
         self.assertIn('CHECKPOINT 8', contenido)
         self.assertNotIn(FROM, contenido)
         self.assertNotIn(ADMIN, contenido)
+
+
+class OrpTest(unittest.TestCase):
+    """Política de origen para la Function URL con OAC: allExcept excluye solo Host. Sin AWS."""
+
+    def setUp(self):
+        with open(os.path.join(RAIZ, 'infra', 'resenas', 'admin-origin-request-policy.json'), encoding='utf-8') as f:
+            self.orp = json.load(f)
+        self.texto = json.dumps(self.orp)
+
+    def test_usa_allexcept_y_excluye_solo_host(self):
+        self.assertEqual(self.orp['HeadersConfig']['HeaderBehavior'], 'allExcept')
+        self.assertEqual(self.orp['HeadersConfig']['Headers'], {'Quantity': 1, 'Items': ['Host']})
+
+    def test_no_contiene_literalmente_x_amz_content_sha256(self):
+        self.assertNotIn('x-amz-content-sha256', self.texto.lower())
+
+    def test_regresion_ninguna_cabecera_x_amz_en_items(self):
+        # Si alguien vuelve a listar cabeceras x-amz-* en Headers.Items (que CloudFront rechazó), esta prueba falla.
+        items = self.orp['HeadersConfig']['Headers']['Items']
+        self.assertEqual([i for i in items if i.lower().startswith('x-amz-')], [])
+
+    def test_cookies_solo_ork3d_admin(self):
+        self.assertEqual(self.orp['CookiesConfig'], {'CookieBehavior': 'whitelist',
+                                                     'Cookies': {'Quantity': 1, 'Items': ['ork3d_admin']}})
+
+    def test_query_solo_estado(self):
+        self.assertEqual(self.orp['QueryStringsConfig'], {'QueryStringBehavior': 'whitelist',
+                                                          'QueryStrings': {'Quantity': 1, 'Items': ['estado']}})
+
+    def test_policy_gestionada_de_cloudfront_no_se_usa(self):
+        self.assertNotIn('AllViewerExceptHostHeader', self.texto)
+        self.assertNotIn('Managed-AllViewer', self.texto)
+
+    def test_el_cliente_sigue_enviando_el_hash_del_body(self):
+        # El frontend no cambia: calcula SHA-256 sobre los bytes del body y los envía con x-amz-content-sha256.
+        with open(os.path.join(RAIZ, 'assets', 'js', 'admin-comun.js'), encoding='utf-8') as f:
+            js = f.read()
+        self.assertIn("cabeceras['x-amz-content-sha256'] = hash", js)
+        self.assertIn("crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto))", js)
+
+    def test_la_cli_rechaza_la_version_anterior_con_cabeceras_x_amz(self):
+        # Reproduce el rechazo observado: cabeceras x-amz-* listadas en Headers.Items.
+        with tempfile.TemporaryDirectory() as tmp:
+            estado = os.path.join(tmp, 'estado.json')
+            anterior = json.loads(self.texto)
+            anterior['HeadersConfig'] = {'HeaderBehavior': 'whitelist', 'Headers': {
+                'Quantity': 2, 'Items': ['Content-Type', 'x-amz-content-sha256']}}
+            ruta = os.path.join(tmp, 'anterior.json')
+            with open(ruta, 'w', encoding='utf-8') as f:
+                json.dump(anterior, f)
+            r = subprocess.run([sys.executable, FAKE_AWS, 'cloudfront', 'create-origin-request-policy',
+                                '--origin-request-policy-config', f'file://{ruta}'],
+                               env={'FAKE_ESTADO': estado, 'PATH': os.environ.get('PATH', '')},
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 255)
+            self.assertIn('InvalidArgument', r.stderr)
+            self.assertIn('x-amz-content-sha256', r.stderr)
+
+
+class RerunConRecursosExistentesTest(DespliegueTest):
+    def test_rerun_crea_solo_orp_y_cloudfront(self):
+        self.assertEqual(self.correr().returncode, 0)
+
+        def deshacer_cloudfront_y_orp(st):
+            st['orps'] = []
+            st['dist']['config'] = fake.configuracion_distribucion()
+            st['dist']['etag'] = 'E2TAGDEMO'
+            st['dist']['estado'] = 'Deployed'
+            st['dist']['pendientes'] = 0
+        self.modificar_estado(deshacer_cloudfront_y_orp)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        r = self.correr()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), ['cloudfront create-origin-request-policy', 'cloudfront update-distribution'])
+        self.assertIn('existe y coincide (idempotente)', r.stdout)
+        self.assertEqual(len(self.estado_actual()['orps']), 1)
+
+    def test_orp_rechazada_muestra_detalle_aws_sanitizado(self):
+        r = self.correr({'FAKE_ORP_RECHAZO': '1'})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        visible = r.stdout + r.stderr
+        self.assertIn('InvalidArgument', visible)
+        self.assertIn('CreateOriginRequestPolicy', visible)
+        self.assertIn('a***@e***.com', visible)
+        self.assertNotIn('ana.moderadora@example.com', visible)
+        self.assertNotIn('9' * 12, visible)  # cuenta falsa del simulador, sin escribirla literal
+        self.assertNotIn('AKIA', visible)
+        self.assertNotIn('X-Amz-Signature', visible)
+        self.assertEqual(self.mutantes()[-1:], ['cloudfront create-origin-request-policy'])
 
 
 if __name__ == '__main__':

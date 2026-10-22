@@ -1,15 +1,12 @@
 {
   "Name": "ork3d-resenas-admin-orp",
-  "Comment": "Panel admin V2: reenvía al origen solo la cookie de sesión, los headers de mutación y el hash del body (OAC). Sin Host.",
+  "Comment": "Panel admin V2 (Function URL con OAC): todas las cabeceras del viewer llegan al origen salvo Host; cookie ork3d_admin y query estado solamente. Sin declarar cabeceras x-amz-*.",
   "HeadersConfig": {
-    "HeaderBehavior": "whitelist",
+    "HeaderBehavior": "allExcept",
     "Headers": {
-      "Quantity": 4,
+      "Quantity": 1,
       "Items": [
-        "Content-Type",
-        "Origin",
-        "X-Admin-Request",
-        "x-amz-content-sha256"
+        "Host"
       ]
     }
   },

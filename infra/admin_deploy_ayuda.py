@@ -13,6 +13,7 @@ Subcomandos (los códigos de salida son los que usa el script):
   dist-nueva CONFIG_DIST SALIDA HOST OAC ORP   agrega origen y behavior admin (sin tocar lo existente)
   dist-verificar ANTES DESPUES ORP         exit 0 si el default, el origen S3 y los behaviors previos no cambiaron
   mascarar CORREO                          imprime el correo enmascarado
+  detalle ARCHIVO_STDERR                   código, operación y mensaje de un error de la CLI, sanitizados
   get ARCHIVO RUTA                         imprime un valor (RUTA con puntos)
   extraer ARCHIVO RUTA SALIDA              escribe el sub-documento de RUTA
   permisos GET_POLICY ARN_DISTRIBUCION     ninguno | ok | DIFIERE (las dos sentencias de CloudFront)
@@ -24,6 +25,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import sys
 import zipfile
 
@@ -311,6 +313,46 @@ def mascarar(correo):
     return local[:1] + '***@' + dominio[:1] + '***.' + dominio.rsplit('.', 1)[-1]
 
 
+def _enmascarar_correos(texto):
+    return re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}', lambda m: mascarar(m.group(0)), texto)
+
+
+def _enmascarar_cuentas(texto):
+    return re.sub(r'\b\d{12}\b', lambda m: '****' + m.group(0)[-4:], texto)
+
+
+SANITIZADORES = (
+    _enmascarar_correos,
+    _enmascarar_cuentas,
+    lambda t: re.sub(r'\b(AKIA|ASIA)[A-Z0-9]{16}\b', '[oculto]', t),
+    lambda t: re.sub(r'(?i)authorization:\s*\S+', '[oculto]', t),
+    lambda t: re.sub(r'(?i)(secret|token|session|password|signature|x-amz-security-token)[^\s,;]{0,40}?[:=]\s*\S+',
+                     '[oculto]', t),
+    lambda t: re.sub(r'https?://\S+\?\S+', '[url con parámetros]', t),
+)
+
+
+def sanitizar(texto):
+    """Quita lo que no debe llegar a un registro: correos y cuentas enmascarados; claves, tokens y URLs firmadas."""
+    for sanitizador in SANITIZADORES:
+        texto = sanitizador(texto)
+    return texto
+
+
+def detalle(archivo):
+    """Código, operación y mensaje de un error de la CLI, sanitizados. Para diagnóstico en el registro."""
+    texto = open(archivo, encoding='utf-8', errors='replace').read()
+    m = re.search(r'An error occurred \((\w+)\) when calling the ([\w-]+) operation: (.*)', texto, re.S)
+    if m:
+        codigo, operacion, mensaje = m.group(1), m.group(2), m.group(3).strip()
+    else:
+        codigo, operacion, mensaje = 'desconocido', '', texto.strip()
+    mensaje = sanitizar(mensaje)[:300]
+    cabeza = codigo + (f' en {operacion}' if operacion else '')
+    print(f'{cabeza}: {mensaje}' if mensaje else cabeza)
+    return 0
+
+
 def obtener(archivo, ruta):
     """Valor por ruta con puntos (p. ej. Distribution.Status). Listas: separadas por coma. Booleanos: true/false."""
     valor = cargar(archivo)
@@ -412,6 +454,8 @@ def main(argv):
     if orden == 'mascarar':
         print(mascarar(args[0]))
         return 0
+    if orden == 'detalle':
+        return detalle(*args)
     if orden == 'get':
         print(obtener(*args))
         return 0
