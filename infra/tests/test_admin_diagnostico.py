@@ -71,9 +71,13 @@ class DecidirTest(unittest.TestCase):
         regs = conjunto(post=('html', 404, 1))
         self.assertEqual(diag.decidir(regs, MAPEO)[0], 'MAPEO_ERRORES_PERSONALIZADOS')
 
-    def test_403_de_la_app_llegado_integro_no_reproduce_el_404(self):
+    def test_403_de_la_app_llegado_integro_es_build_anterior(self):
         regs = conjunto(post=('app', 403, 1))
         self.assertEqual(diag.decidir(regs, MAPEO)[0], 'NO_REPRODUCIDO')
+
+    def test_400_csrf_de_la_app_cumple_el_contrato(self):
+        regs = conjunto(post=('app', 400, 1))
+        self.assertEqual(diag.decidir(regs, MAPEO)[0], 'CONTRATO_CSRF_OK')
 
     def test_control_put_que_no_llega_a_la_api_es_problema_de_comportamiento(self):
         regs = conjunto(post=('html', 404, 1), put=('html', 1))
@@ -207,8 +211,8 @@ class AyudaDiagnosticoTest(unittest.TestCase):
             diag.clasificar(peticiones, config, conclusion)
         texto = leer_texto(conclusion)
         self.assertIn('CONCLUSIÓN: MAPEO_ERRORES_PERSONALIZADOS', texto)
-        self.assertIn('Decisión requerida', texto)
-        self.assertIn('opción 1 si el bucket ya concede s3:ListBucket', texto)
+        self.assertIn('Decisión aprobada: opción 2', texto)
+        self.assertNotIn('Recomendación', texto)
         self.assertEqual(stat.S_IMODE(os.stat(conclusion).st_mode), 0o600)
 
 
@@ -272,7 +276,8 @@ class DiagnosticoScriptTest(unittest.TestCase):
         self.assertEqual(self.peticiones_curl(), [])
 
     def test_caso_observado_concluye_mapeo_solo_con_lectura_y_cuatro_peticiones(self):
-        r = self.correr({'FAKE_CURL_MAPEO': '1'})
+        # Build anterior a §16.8: la API responde 403 y el borde lo reemplaza.
+        r = self.correr({'FAKE_CURL_MAPEO': '1', 'FAKE_CURL_SOLICITAR': '403'})
         visible = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, visible)
         self.assertIn('post-sin-origin: HTTP 404', visible)
@@ -295,10 +300,10 @@ class DiagnosticoScriptTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.dir, nombre)).st_mode), 0o600, nombre)
         self.assertNotIn('X-Amz-Signature', visible)
 
-    def test_sin_mapeo_el_403_de_la_app_no_reproduce_el_404(self):
+    def test_sin_mapeo_el_400_csrf_es_contrato_ok(self):
         r = self.correr()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn('CONCLUSIÓN: NO_REPRODUCIDO', r.stdout + r.stderr)
+        self.assertIn('CONCLUSIÓN: CONTRATO_CSRF_OK', r.stdout + r.stderr)
 
     def test_repetir_reutiliza_los_pasos_ya_hechos(self):
         self.assertEqual(self.correr({'FAKE_CURL_MAPEO': '1'}).returncode, 0)

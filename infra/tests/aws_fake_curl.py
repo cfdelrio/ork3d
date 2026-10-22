@@ -8,7 +8,7 @@ Lee -o (archivo del cuerpo), -D (archivo de cabeceras), -w (solo se usa %{http_c
   POST /admin/api/sesion/solicitar, válido  202 (FAKE_CURL_SOLICITAR_VALIDO). Válido = Origin correcto,
                                             Content-Type JSON, X-Admin-Request: 1, y x-amz-content-sha256 igual al
                                             SHA-256 de los bytes realmente enviados.
-  POST /admin/api/sesion/solicitar, inválido 403 de la API (FAKE_CURL_SOLICITAR), sin efecto.
+  POST /admin/api/sesion/solicitar, inválido 400 de la API (FAKE_CURL_SOLICITAR), sin efecto.
   otra ruta /admin/api/...                  404 de la API
   fuera de /admin/api/                      404 del sitio (página de error de S3, sin formato de la API)
 
@@ -26,7 +26,7 @@ import time
 
 ORIGEN = 'https://ork3d.com'
 CUERPO_401 = '{"ok": false, "error": "no_autenticado", "mensaje": "Tenés que iniciar sesión."}'
-CUERPO_403 = '{"ok": false, "error": "origen", "mensaje": "Origen no permitido."}'
+CUERPO_400 = '{"ok": false, "error": "origen", "mensaje": "Origen no permitido."}'
 CUERPO_202 = '{"ok": true}'
 CUERPO_405 = '{"ok": false, "error": "metodo", "mensaje": "Método no permitido."}'
 CUERPO_404_API = '{"ok": false, "error": "no_encontrado", "mensaje": "No existe."}'
@@ -95,8 +95,8 @@ def respuesta_de_la_api(ruta, metodo, cabeceras, cuerpo):
         if valido:
             return (os.environ.get('FAKE_CURL_SOLICITAR_VALIDO', '202'),
                     os.environ.get('FAKE_CURL_SOLICITAR_VALIDO_CUERPO', CUERPO_202), True)
-        return (os.environ.get('FAKE_CURL_SOLICITAR', '403'),
-                os.environ.get('FAKE_CURL_SOLICITAR_CUERPO', CUERPO_403), False)
+        return (os.environ.get('FAKE_CURL_SOLICITAR', '400'),
+                os.environ.get('FAKE_CURL_SOLICITAR_CUERPO', CUERPO_400), False)
     if ruta.startswith('/admin/api/'):
         return '404', CUERPO_404_API, False
     return None

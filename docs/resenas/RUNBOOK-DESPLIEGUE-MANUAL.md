@@ -1095,7 +1095,7 @@ Antes de cada paso PLAN: copia de la configuración actual, en un archivo fuera 
 Ejecutar solo después de la autorización de 18.3. Todo dato de prueba se identifica con `order_ref` que empieza con `SMOKE-V2`.
 
 1. Sin sesión: `GET /admin/resenas` responde 200 con `noindex, nofollow`. `GET /admin/api/sesion` responde 401.
-   `POST /admin/api/sesion/solicitar` sin `Origin` responde 403 y no envía correo.
+   `POST /admin/api/sesion/solicitar` sin `Origin` responde 400 y no envía correo (V2-ADMIN.md §16.8).
 2. Acceso: `POST /admin/api/sesion/solicitar` con las cabeceras CSRF. Llega **un** correo al buzón de moderación,
    con el enlace `…/admin/entrar#c=…`. Abrir el enlace sin confirmar: no consume el código. Confirmar: 200 y
    cookie `ork3d_admin` con `HttpOnly; Secure; SameSite=Lax; Path=/admin`. Reusar el enlace: 401.

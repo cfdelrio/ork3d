@@ -102,11 +102,14 @@ El buzón de administración debe tener 2FA. Es un requisito operativo, no hay c
 Para toda mutación administrativa (todos los `POST`):
 
 - Cookie de sesión válida (salvo `solicitar` y `confirmar`).
-- `Content-Type: application/json` (exacto, con o sin `; charset=utf-8`). Si no, `415`.
-- `Origin` exactamente igual a `ALLOWED_ORIGIN`. Si no, `403`.
-- Header `X-Admin-Request: 1`. Si falta, `403`.
+- `Content-Type: application/json` (exacto, con o sin `; charset=utf-8`). Si no, `400` (`content_type`).
+- `Origin` exactamente igual a `ALLOWED_ORIGIN`. Si no, `400` (`origen`).
+- Header `X-Admin-Request: 1`. Si falta o tiene otro valor, `400` (`csrf`).
 - Header `x-amz-content-sha256` con el SHA-256 hex exacto del body en todo POST. Lo exige OAC hacia la Function URL; el detalle está en §16.2. El panel lo calcula en `llamar()`.
-- Un `POST` sin sesión responde `401`. Con sesión pero sin cabeceras, responde `403`.
+- Un `POST` sin sesión responde `401`. Con sesión pero sin cabeceras, responde `400`.
+
+Los rechazos de cabeceras CSRF son `400`, no `403`: CloudFront reemplaza los 403 de la distribución por la página de
+error del sitio (§16.7). La decisión y su alcance están en §16.8.
 
 Los `GET` nunca producen efectos secundarios. Se testea con snapshot del almacén.
 
@@ -145,15 +148,15 @@ Errores: `{"ok": false, "error": "<codigo>", "mensaje": "<texto>", ...}`.
 | 400 | `json` | cuerpo malformado |
 | 401 | `no_autenticado` | sin sesión o sesión vencida |
 | 401 | `codigo_invalido` | código de login inválido, vencido o usado (mismo mensaje en todos) |
-| 403 | `csrf` | faltan cabeceras CSRF |
-| 403 | `origen` | `Origin` distinto del permitido |
+| 400 | `csrf` | falta o es incorrecta la cabecera `X-Admin-Request` (§16.8) |
+| 400 | `origen` | `Origin` ausente o distinto del permitido (§16.8) |
 | 404 | `no_encontrado` | reseña inexistente o sin foto |
 | 409 | `estado_incompatible` | acción no permitida en el estado actual (incluye `estado_actual`) |
 | 409 | `sin_permiso` | la reseña no tiene `permission_to_publish` |
 | 409 | `conflicto_concurrencia` | la reseña cambió mientras se trabajaba |
 | 409 | `ya_enviado` | `reenviar-aviso` cuando el aviso ya salió |
 | 413 | `demasiado_grande` | cuerpo mayor a 8 KB |
-| 415 | `content_type` | no es `application/json` |
+| 400 | `content_type` | no es `application/json` (§16.8) |
 | 409 | `foto_invalida` | la foto privada no se puede publicar (no existe, no es JPEG o trae metadatos) |
 | 503 | `foto_no_publicada` | la copia de la foto falló antes de escribir el estado (nada cambió) |
 | 503 | `export_ocupado` | `POST /admin/api/exportar` mientras otro proceso regenera el export (reintentar) |
@@ -515,13 +518,13 @@ y el path de `rawPath` (sin barra final); `path` se usa solo como respaldo para 
 | Petición | Resultado esperado | Efectos |
 |---|---|---|
 | `GET /admin/api/sesion` sin cookie | 401 `no_autenticado` | ninguno |
-| `POST /admin/api/sesion/solicitar` sin `Origin` | 403 de la app (`_csrf` antes que cualquier otra cosa) | ningún correo |
+| `POST /admin/api/sesion/solicitar` sin `Origin` | 400 de la app (`_csrf` antes que cualquier otra cosa) | ningún correo |
 | `POST /admin/api/sesion/solicitar` válido | 202 | exactamente un correo |
 | `POST /admin/api/sesion/solicitar/extra`, `/admin/api2/...` | 404 de la app | ningún correo |
 | `GET /admin/api/sesion/solicitar` | 405 | ningún correo |
 
 Un 404 de la app trae JSON con `"ok": false` y `"error": "no_encontrado"`. Un 404 de CloudFront o de la Function URL
-no trae ese formato. El smoke de §10 lo indica en el mensaje de error: si el 401 o el 403 no tienen el formato de la
+no trae ese formato. El smoke de §10 lo indica en el mensaje de error: si el 401 o el 400 no tienen el formato de la
 app, el problema está en el borde (CloudFront o Function URL), no en el router.
 
 ### 16.6 Actualización de código de la Lambda admin
@@ -568,15 +571,38 @@ Para confirmarlo sin escribir en AWS: `ALLOW_ADMIN_DIAGNOSTICO=1 infra/admin-dia
 peticiones sin efectos). Si concluye `MAPEO_ERRORES_PERSONALIZADOS`, la Lambda sí recibió el POST y el borde reescribió
 la respuesta. Otras conclusiones posibles están en `infra/admin_diagnostico_ayuda.py` (`decidir`).
 
-Decisión pendiente (no se toma en código porque cambia el contrato o la web pública):
+La decisión que se tomó sobre este caso está en §16.8. Las opciones que se evaluaron fueron estas:
 
-1. Dejar de mapear 403 en la distribución. Requiere que el OAC pueda listar el bucket (`s3:ListBucket`) para que los
-   faltantes sigan dando 404 real. Afecta la web pública: verificar antes y después `/opinar`, `/opiniones` y
-   `error.html`. Es la opción preferida si el bucket ya concede `ListBucket`.
-2. Cambiar el status de los rechazos CSRF a un código que no se reescribe. Cambia el contrato y el criterio del
-   CHECKPOINT 6B del smoke, así que requiere aprobación explícita.
-3. Servir la API desde otro host sin errores personalizados. Requiere DNS, fuera de alcance sin confirmación.
+1. Dejar de mapear 403 en la distribución. Descartada: cambia la web pública y exige `s3:ListBucket` en el OAC.
+2. Cambiar el status de los rechazos CSRF de la API a un código que no se reescribe. **Aprobada**: §16.8.
+3. Servir la API desde otro host sin errores personalizados. Descartada: requiere DNS.
 
-Mientras tanto, el POST válido con `Origin` no pasa por el mapeo (202 no está en la lista): el criterio 3 de V2 no
-depende de la decisión. Sí quedan bloqueados el CHECKPOINT 6B del smoke y cualquier rechazo que el frontend deba
-leer como JSON. Ningún rechazo llega a SES, así que la decisión no cambia la seguridad del login.
+### 16.8 Contrato CSRF: 400 (decisión aprobada)
+
+Decisión: opción 2 de §16.7. Los rechazos de cabeceras CSRF de la API responden **400** con el mismo JSON
+(`{"ok": false, "error": "<codigo>", "mensaje": "La solicitud no es válida."}`).
+
+| Rechazo | Antes | Ahora | `error` |
+|---|---|---|---|
+| `Origin` ausente o distinto de `ALLOWED_ORIGIN` | 403 | 400 | `origen` |
+| `X-Admin-Request` ausente o distinto de `1` | 403 | 400 | `csrf` |
+| `Content-Type` distinto de `application/json` | 415 | 400 | `content_type` |
+
+Sin cambios: 401 (sesión y código de login), 404 (rutas desconocidas), 409 (estado, permiso y concurrencia), 413,
+400 de validación y de JSON, 503. Ningún otro 403 de la API admin existía. El 403 de `api/resenas/app.py`
+es de la API V1 pública y no se toca.
+
+Seguridad: el rechazo ocurre en `_csrf` antes de cualquier efecto. No se llama a SES ni se escribe en S3. Los tests
+(`test_routing_v2`, `test_admin_auth`, `test_admin_api`) verifican cero correos y cero escrituras en cada caso.
+
+No se tocó: `CustomErrorResponses` de CloudFront, el bucket público, `s3:ListBucket`, el hostname ni la política
+de origen. La API ya no usa 403 para CSRF, así que el mapeo de 403 no alcanza a estos rechazos.
+
+Frontend: `assets/js/admin-panel.js` trata como rechazo CSRF el 400 con `origen`, `csrf` o `content_type`, y también
+el 403 de versiones anteriores. Muestra "Recargá la página e intentá de nuevo", no errores de campo.
+
+Smoke: el CHECKPOINT 6B espera `400` y sigue sin enviar correo. El CHECKPOINT 6 (401) no cambia.
+
+Despliegue: `api/resenas/admin_app.py` y `nucleo/sesion.py` cambian, así que el `CodeSha256` del paquete cambia. El
+próximo deploy necesita `ALLOW_ADMIN_CODE_UPDATE=1` (§16.6). La configuración de CloudFront coincide y no se vuelve a
+llamar a `UpdateDistribution`.

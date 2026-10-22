@@ -434,7 +434,7 @@ class ExportTest(AdminSesionCase):
         self.assertEqual(self.pedir('POST', '/admin/api/exportar')['statusCode'], 401)
         r = self.pedir('POST', '/admin/api/exportar', cookies=self.cookies,
                        cabeceras={'origin': ORIGEN, 'content-type': 'application/json'})
-        self.assertEqual(r['statusCode'], 403)
+        self.assertEqual(r['statusCode'], 400)
 
 
 class ReenvioTest(AdminSesionCase):

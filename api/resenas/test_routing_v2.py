@@ -6,7 +6,7 @@ evento_a_entrada -> ServicioAdmin.atender -> a_respuesta_http. Sin AWS: SES y S3
 
 Lo que se demuestra:
 - GET /admin/api/sesion sin cookie llega a la app y responde 401 con el formato de la app.
-- POST /admin/api/sesion/solicitar sin Origin llega a _solicitar y _csrf responde 403 antes de tocar SES.
+- POST /admin/api/sesion/solicitar sin Origin llega a _solicitar y _csrf responde 400 antes de tocar SES.
 - POST válido llega a _solicitar y envía exactamente un correo (FakeSES).
 - Rutas desconocidas responden 404 de la app (con error no_encontrado) y nunca envían correo.
 """
@@ -63,10 +63,10 @@ class RoutingV2Test(AdminCase):
         self.assertIn('no_autenticado', r['body'])
         self.assertEqual(self.solicitudes_de_correo(), 0)
 
-    def test_post_solicitar_sin_origin_llega_a_csrf_y_da_403_sin_correo(self):
+    def test_post_solicitar_sin_origin_llega_a_csrf_y_da_400_sin_correo(self):
         r = self.llamar(evento_v2('POST', '/admin/api/sesion/solicitar',
                                   cabeceras=CABECERAS_SIN_ORIGEN, cuerpo='{}'))
-        self.assertEqual(r['statusCode'], 403)
+        self.assertEqual(r['statusCode'], 400)
         self.assertEqual(self.solicitudes_de_correo(), 0)
 
     def test_post_solicitar_valido_llega_a_solicitar_y_envia_un_correo(self):
@@ -113,9 +113,9 @@ class RoutingV2Test(AdminCase):
         self.assertIn('"ok": false', r['body'])
         self.assertIn('"error": "no_encontrado"', r['body'])
 
-    def test_403_csrf_tiene_formato_de_la_app(self):
+    def test_400_csrf_tiene_formato_de_la_app(self):
         r = self.llamar(evento_v2('POST', '/admin/api/sesion/solicitar', cabeceras=CABECERAS_SIN_ORIGEN, cuerpo='{}'))
-        self.assertEqual(r['statusCode'], 403)
+        self.assertEqual(r['statusCode'], 400)
         self.assertIn('"ok": false', r['body'])
 
     def test_rawpath_y_requestcontext_coinciden_en_el_evento_de_aws(self):

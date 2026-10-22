@@ -15,6 +15,10 @@
   var MENSAJE_BASE = 'Hola, gracias por tu compra en ORK3D. ¿Nos contás cómo te fue? Dejá tu opinión acá (vence en {dias} días): {link}';
   var MSG_SESION = 'Tu sesión venció. Iniciá acceso de nuevo.';
   var MSG_EXPORT_PENDIENTE = 'Export pendiente: el estado cambió, pero el export no se pudo actualizar.';
+  var MSG_RECARGAR = 'No se pudo completar la acción. Recargá la página e intentá de nuevo.';
+  // Rechazos de cabeceras CSRF de la API: 400 con estos códigos (V2-ADMIN.md §5 y §16.8). El 403 de versiones
+  // anteriores de la API se trata igual.
+  var CSRF_ERRORES = ['origen', 'csrf', 'content_type'];
   var EXITO = {
     aprobar: 'Reseña aprobada.',
     rechazar: 'Reseña rechazada.',
@@ -183,6 +187,11 @@
     return null;
   }
 
+  function esRechazoCsrf(r) {
+    var error = r.datos && r.datos.error;
+    return r.status === 403 || (r.status === 400 && CSRF_ERRORES.indexOf(error) !== -1);
+  }
+
   function mostrarErroresDelServidor(resultado) {
     var campos = (resultado.datos && resultado.datos.campos) || {};
     var errores = {};
@@ -249,6 +258,10 @@
       }
       if (r.status === 401) {
         mostrarAcceso(MSG_SESION, 'aviso');
+        return;
+      }
+      if (esRechazoCsrf(r)) {
+        A.avisar($('err-general'), MSG_RECARGAR, 'error');
         return;
       }
       if (r.status === 400) {
@@ -721,8 +734,8 @@
       }
       return null;
     }
-    if (r.status === 403) {
-      A.avisar($('aviso-detalle'), 'No se pudo completar la acción. Recargá la página e intentá de nuevo.', 'error');
+    if (esRechazoCsrf(r)) {
+      A.avisar($('aviso-detalle'), MSG_RECARGAR, 'error');
       return null;
     }
     A.avisar($('aviso-detalle'), A.mensajeDe(r, 'No pudimos completar la acción. Probá de nuevo.'), 'error');

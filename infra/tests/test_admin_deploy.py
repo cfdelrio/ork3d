@@ -402,7 +402,7 @@ class SmokeTest(DespliegueTest):
     def test_post_sin_cuerpo_de_la_api_sale_con_6(self):
         r = self.correr({'FAKE_CURL_SOLICITAR_CUERPO': '<html>AccessDenied</html>'})
         self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
-        self.assertIn('se esperaba 403', r.stdout + r.stderr)
+        self.assertIn('se esperaba 400', r.stdout + r.stderr)
 
     def test_smoke_no_envia_correo(self):
         self.correr()
@@ -542,7 +542,7 @@ class SmokeMagicTest(DespliegueTest):
                 self.assertEqual(len(self.solicitudes_validas()), 1, 'no debe reintentar')
                 self.assertNotIn('CHECKPOINT 7', r.stdout)
 
-    def test_negativo_403_jamas_envia_correo(self):
+    def test_negativo_400_jamas_envia_correo(self):
         self.correr()
         negativos = [p for p in self.peticiones() if p['ruta'] == '/admin/api/sesion/solicitar']
         self.assertEqual(len(negativos), 1)
@@ -563,7 +563,7 @@ class SmokeMagicTest(DespliegueTest):
         r = self.correr(magico=True)
         orden = ['CHECKPOINT 1 — backups OK', 'CHECKPOINT 2 — IAM OK', 'CHECKPOINT 3 — Lambda admin OK',
                  'CHECKPOINT 4 — Function URL/OAC OK', 'CHECKPOINT 5 — CloudFront Deployed',
-                 'CHECKPOINT 6 — GET sesión 401', 'CHECKPOINT 6B — CSRF negativo 403',
+                 'CHECKPOINT 6 — GET sesión 401', 'CHECKPOINT 6B — CSRF negativo 400',
                  'CHECKPOINT 7 — POST solicitar 202', 'CHECKPOINT 8 — logs sanitizados']
         posiciones = [r.stdout.index(c) for c in orden]
         self.assertEqual(posiciones, sorted(posiciones))

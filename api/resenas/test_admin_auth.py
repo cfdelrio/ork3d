@@ -92,9 +92,9 @@ class SolicitarTest(AdminCase):
         self.assertEqual((r['statusCode'], datos(r)), (202, {'ok': True}))
         self.assertEqual(self.ses.enviados, [])
 
-    def test_sin_csrf_responde_403_y_no_cuenta_ni_envia(self):
+    def test_sin_csrf_responde_400_y_no_cuenta_ni_envia(self):
         r = self.solicitar({}, cabeceras={'content-type': 'application/json'})
-        self.assertEqual((r['statusCode'], datos(r)['error']), (403, 'origen'))
+        self.assertEqual((r['statusCode'], datos(r)['error']), (400, 'origen'))
         self.assertEqual(self.ses.enviados, [])
         self.assertNotIn('admin/limites/acceso.json', self.s3.objects)
 
@@ -156,9 +156,9 @@ class ConfirmarTest(AdminCase):
         self.assertEqual(self.pedir('GET', '/admin/api/sesion/confirmar')['statusCode'], 405)
         self.assertEqual(self.confirmar()['statusCode'], 200)
 
-    def test_confirmar_sin_csrf_responde_403_y_no_consume(self):
+    def test_confirmar_sin_csrf_responde_400_y_no_consume(self):
         r = self.confirmar(cabeceras={'content-type': 'application/json'})
-        self.assertEqual(r['statusCode'], 403)
+        self.assertEqual(r['statusCode'], 400)
         self.assertEqual(self.confirmar()['statusCode'], 200)
 
     def test_confirmar_sin_cuerpo_responde_401_sin_detalle(self):
@@ -192,7 +192,7 @@ class SesionTest(AdminSesionCase):
     def test_cerrar_sin_csrf_no_cierra_la_sesion(self):
         r = self.pedir('POST', '/admin/api/sesion/cerrar', cookies=self.cookies,
                        cabeceras={'origin': ORIGEN_EXTRANO, 'content-type': 'application/json'})
-        self.assertEqual(r['statusCode'], 403)
+        self.assertEqual(r['statusCode'], 400)
         self.assertEqual(self.pedir('GET', '/admin/api/sesion', cookies=self.cookies)['statusCode'], 200)
 
 
@@ -204,31 +204,31 @@ class CsrfTest(AdminSesionCase):
     def test_mutacion_sin_sesion_responde_401(self):
         self.assertEqual(self.invitar(cookies=[])['statusCode'], 401)
 
-    def test_origen_ausente_o_distinto_responde_403(self):
+    def test_origen_ausente_o_distinto_responde_400(self):
         for origen in [None, ORIGEN_EXTRANO, 'https://ork3d.com.evil.example', 'http://ork3d.com', 'https://ORK3D.com', ORIGEN + '/']:
             with self.subTest(origen=origen):
                 cabeceras = {k: v for k, v in CABECERAS_CSRF.items() if k != 'origin'}
                 if origen is not None:
                     cabeceras['origin'] = origen
                 r = self.invitar(cabeceras)
-                self.assertEqual((r['statusCode'], datos(r)['error']), (403, 'origen'))
+                self.assertEqual((r['statusCode'], datos(r)['error']), (400, 'origen'))
 
-    def test_content_type_distinto_de_json_responde_415(self):
+    def test_content_type_distinto_de_json_responde_400(self):
         for tipo in ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data']:
             with self.subTest(tipo=tipo):
                 r = self.invitar({**CABECERAS_CSRF, 'content-type': tipo})
-                self.assertEqual((r['statusCode'], datos(r)['error']), (415, 'content_type'))
+                self.assertEqual((r['statusCode'], datos(r)['error']), (400, 'content_type'))
 
     def test_content_type_json_con_charset_se_acepta(self):
         r = self.invitar({**CABECERAS_CSRF, 'content-type': 'application/json; charset=utf-8'})
         self.assertEqual(r['statusCode'], 201)
 
-    def test_falta_o_es_incorrecta_la_cabecera_x_admin_request_responde_403(self):
+    def test_falta_o_es_incorrecta_la_cabecera_x_admin_request_responde_400(self):
         sin = {k: v for k, v in CABECERAS_CSRF.items() if k != 'x-admin-request'}
         for cabeceras in [sin, {**CABECERAS_CSRF, 'x-admin-request': '0'}]:
             with self.subTest(cabeceras=cabeceras):
                 r = self.invitar(cabeceras)
-                self.assertEqual((r['statusCode'], datos(r)['error']), (403, 'csrf'))
+                self.assertEqual((r['statusCode'], datos(r)['error']), (400, 'csrf'))
 
     def test_csrf_fallido_no_toca_el_almacen(self):
         antes = dict(self.s3.objects)

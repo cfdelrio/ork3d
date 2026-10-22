@@ -554,19 +554,19 @@ if [[ "$CODIGO_A" != 401 ]] || ! grep -q no_autenticado "$T/a.body"; then
 fi
 echo "CHECKPOINT 6 — GET sesión 401"
 
-# Negativo 2: POST de magic link SIN Origin. CSRF lo rechaza antes de tocar SES: 403 de la API, sin correo.
+# Negativo 2: POST de magic link SIN Origin. CSRF lo rechaza antes de tocar SES: 400 de la API, sin correo.
 printf '{}' > "$T/vacio.json"
 HASH="$(sha256sum "$T/vacio.json" | cut -d' ' -f1)"
 CODIGO_C="$($CURL -sS -o "$T/c.body" -w '%{http_code}' -X POST \
   -H 'Content-Type: application/json' -H 'X-Admin-Request: 1' -H "x-amz-content-sha256: $HASH" \
   --data-binary "@$T/vacio.json" "$BASE/admin/api/sesion/solicitar")" \
   || fallo "no se pudo llamar a $BASE/admin/api/sesion/solicitar"
-if [[ "$CODIGO_C" != 403 ]] || ! grep -q '"ok": false' "$T/c.body"; then
+if [[ "$CODIGO_C" != 400 ]] || ! grep -q '"ok": false' "$T/c.body"; then
   if grep -q '"ok": false' "$T/c.body"; then ORIGEN_C="con formato de la app"; else ORIGEN_C="sin formato de la app (probable CloudFront o Function URL)"; fi
-  echo "ERROR: POST /admin/api/sesion/solicitar sin Origin → $CODIGO_C, respuesta $ORIGEN_C (se esperaba 403 de la API)." >&2
+  echo "ERROR: POST /admin/api/sesion/solicitar sin Origin → $CODIGO_C, respuesta $ORIGEN_C (se esperaba 400 de la API)." >&2
   exit 6
 fi
-echo "CHECKPOINT 6B — CSRF negativo 403 (rechazado antes de enviar correo)"
+echo "CHECKPOINT 6B — CSRF negativo 400 (rechazado antes de enviar correo)"
 
 # Positivo: UN solo POST de magic link, solo con ALLOW_ADMIN_MAGIC_EMAIL=1. Sin reintentos.
 if [[ "${ALLOW_ADMIN_MAGIC_EMAIL:-}" == "1" ]]; then
@@ -602,6 +602,6 @@ paso "11. Cierre"
 ) || fallo "no se pudo escribir el manifest de rollback"
 echo "  rollback y manifest en $RB (ejecución $STAMP)"
 echo
-echo "API admin V2 desplegada. Smoke: 401 y 403 verificados."
+echo "API admin V2 desplegada. Smoke: 401 y 400 verificados."
 echo "Detenido aquí: frontend admin NO desplegado; Lambda pública NO modificada; RESENAS_NOTIFY_ENABLED sin cambios."
 exit 0

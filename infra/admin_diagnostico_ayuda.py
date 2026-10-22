@@ -162,8 +162,13 @@ def decidir(registros, cfg):
     post, put = por_nombre.get('post-sin-origin'), por_nombre.get('put-control')
     if post is None or put is None:
         return 'INCOMPLETO', 'faltan peticiones: post-sin-origin y put-control son obligatorias'
+    if post['codigo'] == 400 and post['tipo'] == 'app':
+        return ('CONTRATO_CSRF_OK',
+                'el rechazo CSRF llega como 400 de la API y el borde no lo reescribe (V2-ADMIN.md §16.8)')
     if post['codigo'] == 403 and post['tipo'] == 'app':
-        return 'NO_REPRODUCIDO', 'el 403 de la app llegó íntegro: el 404 no se reprodujo en esta ejecución'
+        return ('NO_REPRODUCIDO',
+                'el 403 de la app llegó íntegro: el build desplegado es anterior a §16.8 (CSRF → 400), '
+                'o el 404 no se reprodujo')
     if put['tipo'] != 'app':
         return ('BORDE_COMPORTAMIENTO',
                 'el control PUT /admin/api/sesion no llega a la API: el behavior /admin/api/* o sus métodos no '
@@ -188,12 +193,9 @@ def decidir(registros, cfg):
 
 
 OPCIONES_MAPEO = [
-    'Decisión requerida (docs/resenas/V2-ADMIN.md §16.7). El router no cambia.',
-    '  1. Dejar de mapear 403 en la distribución: el sitio debe servir 404 real para los faltantes (s3:ListBucket',
-    '     en el OAC del bucket). Toca la web pública: verificar antes y después /opinar, /opiniones y error.html.',
-    '  2. Cambiar el status de los rechazos de la API que hoy son 403 (CSRF) a un código que no se reescribe.',
-    '     Cambia el contrato de la API y el criterio del CHECKPOINT 6B del smoke: requiere aprobación explícita.',
-    '  3. Servir la API desde otro host sin errores personalizados. Requiere DNS: fuera de alcance sin confirmación.',
+    'Causa: CloudFront reemplazó el 403 CSRF de la API por la página de error del sitio (CustomErrorResponses).',
+    'Decisión aprobada: opción 2, CSRF → 400 (docs/resenas/V2-ADMIN.md §16.8). Sin este resultado con el build nuevo,',
+    'el despliegue del código no se aplicó: revisar ALLOW_ADMIN_CODE_UPDATE y el CodeSha256 de la Lambda.',
 ]
 
 
@@ -206,10 +208,7 @@ def clasificar(peticiones, config_resumen, conclusion):
               f"invocaciones {r['invocaciones']}" for r in registros]
     lineas += ['', f'CONCLUSIÓN: {codigo}', motivo]
     if codigo == 'MAPEO_ERRORES_PERSONALIZADOS':
-        recomendacion = ('Recomendación: opción 1 si el bucket ya concede s3:ListBucket; si no, opción 2 tras '
-                         'aprobación.' if cfg.get('listbucket_oac') else
-                         'Recomendación: opción 2 tras aprobación (la opción 1 exige conceder s3:ListBucket antes).')
-        lineas += [''] + OPCIONES_MAPEO + ['', recomendacion]
+        lineas += [''] + OPCIONES_MAPEO
     texto = '\n'.join(lineas) + '\n'
     with open(conclusion, 'w', encoding='utf-8') as f:
         f.write(texto)

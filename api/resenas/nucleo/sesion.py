@@ -57,14 +57,19 @@ def leer_cookie(cookies, cabeceras):
 
 
 def comprobar_mutacion(cabeceras, origen_permitido):
-    """Cabeceras obligatorias de toda mutación (POST). Levanta ErrorCsrf si faltan."""
+    """Cabeceras obligatorias de toda mutación (POST). Levanta ErrorCsrf si faltan.
+
+    Son rechazos de forma de la petición y responden 400. CloudFront reemplaza los 403 y 404 de la distribución por la
+    página de error del sitio (V2-ADMIN.md §16.7), así que el código no puede ser 403. La seguridad no depende del código:
+    el rechazo ocurre antes de cualquier efecto.
+    """
     if cabeceras.get('origin') != origen_permitido:
-        raise errores.ErrorCsrf(403, 'origen')
+        raise errores.ErrorCsrf(400, 'origen')
     media = (cabeceras.get('content-type') or '').split(';')[0].strip().lower()
     if media != 'application/json':
-        raise errores.ErrorCsrf(415, 'content_type')
+        raise errores.ErrorCsrf(400, 'content_type')
     if cabeceras.get('x-admin-request') != '1':
-        raise errores.ErrorCsrf(403, 'csrf')
+        raise errores.ErrorCsrf(400, 'csrf')
 
 
 class Sesiones:
