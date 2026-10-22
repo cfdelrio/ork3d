@@ -62,7 +62,7 @@ def validar_javascript():
 
 def validar_shell():
     archivos = ['deploy.sh', 'verify.sh', 'infra/setup.sh', 'infra/teardown.sh', 'infra/resenas-setup.sh',
-                'infra/admin-setup.sh', 'infra/smoke-if-match.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh',
+                'infra/admin-setup.sh', 'infra/smoke-if-match.sh', 'infra/smoke-ses.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh',
                 'admin/tests/fixtures.sh']
     for rel in archivos:
         r = correr(['bash', '-n', rel])
@@ -316,6 +316,17 @@ def validar_preflight_v2():
               r.returncode == 3 and 'ABORTA' in r.stderr, f'rc={r.returncode} {r.stderr.strip()[:200]}')
 
 
+# ── Smoke de SES para V2: envía un correo solo con ALLOW_SES_SEND=1 ──
+def validar_smoke_ses():
+    smoke = leer('infra/smoke-ses.sh')
+    comprobar('Smoke SES: la guarda ALLOW_SES_SEND=1 va antes de cualquier llamada a AWS',
+              smoke.index('ALLOW_SES_SEND') < smoke.index('"$AWS" '))
+    # Entorno vacío: sin ALLOW_SES_SEND=1 el smoke debe abortar con 3 antes de tocar AWS.
+    r = correr(['env', '-i', 'PATH=' + os.environ.get('PATH', ''), 'bash', 'infra/smoke-ses.sh'])
+    comprobar('Smoke SES: sin ALLOW_SES_SEND=1 aborta con código 3 antes de llamar a AWS',
+              r.returncode == 3 and 'ABORTA' in r.stderr, f'rc={r.returncode} {r.stderr.strip()[:200]}')
+
+
 def main():
     validar_javascript()
     validar_shell()
@@ -327,6 +338,7 @@ def main():
     validar_despliegue()
     validar_admin_v2()
     validar_preflight_v2()
+    validar_smoke_ses()
     print(f'\nValidaciones: {aprobadas} PASS, {len(fallos)} FAIL')
     sys.exit(1 if fallos else 0)
 
