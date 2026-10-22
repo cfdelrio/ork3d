@@ -3,6 +3,7 @@
 Sin AWS, sin red y sin credenciales: aws_fake_admin.py guarda el estado en un JSON, aws_fake_git.py y
 aws_fake_curl.py reemplazan git y curl. ADMIN_DEPLOY_RUTA apunta a una carpeta temporal.
 """
+import base64
 import hashlib
 import importlib.util
 import json
@@ -27,7 +28,7 @@ HEAD = '202ecb7ed9016a607eb2854f3d5a92ccf8a5466c'
 FROM = 'remitente-prueba@ejemplo.test'
 ADMIN = 'moderacion-prueba@ejemplo.test'
 SENTINELA = 'VALOR-SENTINELA-ADMIN-DEPLOY-5522'
-MUTANTES = ('create-', 'put-', 'attach-', 'add-permission', 'update-distribution')
+MUTANTES = ('create-', 'put-', 'attach-', 'add-permission', 'update-distribution', 'update-function-code')
 CUENTA = '9' * 12  # cuenta falsa (no se escribe literal: el escaneo del repo la marcaría)
 DIST_ARN = f'arn:aws:cloudfront::{CUENTA}:distribution/ECOW0H6A48HVP'
 
@@ -110,7 +111,11 @@ class DespliegueTest(unittest.TestCase):
         carpeta = os.path.join(self.rb, 'rollback')
         if not os.path.isdir(carpeta):
             return {}
-        return {n: open(os.path.join(carpeta, n), 'rb').read() for n in os.listdir(carpeta)}
+        contenidos = {}
+        for n in os.listdir(carpeta):
+            with open(os.path.join(carpeta, n), 'rb') as f:
+                contenidos[n] = f.read()
+        return contenidos
 
 
 class PrechecksTest(DespliegueTest):
@@ -710,6 +715,97 @@ class RerunConRecursosExistentesTest(DespliegueTest):
         self.assertNotIn('AKIA', visible)
         self.assertNotIn('X-Amz-Signature', visible)
         self.assertEqual(self.mutantes()[-1:], ['cloudfront create-origin-request-policy'])
+
+
+class CodigoLambdaTest(DespliegueTest):
+    """Código de la Lambda admin distinto del repo: solo con ALLOW_ADMIN_CODE_UPDATE=1 y con copia de rollback verificada."""
+
+    def setUp(self):
+        super().setUp()
+        self.anterior = os.path.join(self.tmp, 'codigo-anterior.zip')
+        with open(self.anterior, 'wb') as f:
+            f.write(b'codigo anterior de prueba')
+        self.sha_anterior = base64.b64encode(hashlib.sha256(b'codigo anterior de prueba').digest()).decode('ascii')
+
+    def sha_del_repo(self):
+        ruta = os.path.join(self.tmp, 'repo.zip')
+        return subprocess.run([sys.executable, AYUDA, 'zip', RAIZ, ruta], capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    def poner_codigo_anterior(self):
+        def cambiar(st):
+            st['lambda']['config']['CodeSha256'] = self.sha_anterior
+        self.modificar_estado(cambiar)
+
+    def limpiar_log(self):
+        if os.path.exists(self.log):
+            os.remove(self.log)
+
+    def copias_de_codigo(self):
+        return [n for n in self.copias() if n.startswith('lambda-admin-codigo-anterior.')]
+
+    def test_codigo_distinto_sin_flag_aborta_con_4_sin_escribir(self):
+        self.assertEqual(self.correr().returncode, 0)
+        self.poner_codigo_anterior()
+        self.limpiar_log()
+        r = self.correr()
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+        self.assertIn('ALLOW_ADMIN_CODE_UPDATE=1', r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
+        self.assertEqual(self.estado_actual()['lambda']['config']['CodeSha256'], self.sha_anterior)
+        self.assertEqual(self.copias_de_codigo(), [])
+
+    def test_con_flag_actualiza_solo_el_codigo_y_guarda_el_anterior(self):
+        self.assertEqual(self.correr().returncode, 0)
+        self.poner_codigo_anterior()
+        self.limpiar_log()
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1', 'FAKE_CODIGO_ANTERIOR_ARCHIVO': self.anterior})
+        visible = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, visible)
+        # Solo el código: ni rol, ni Function URL, ni permisos, ni CloudFront.
+        self.assertEqual(self.mutantes(), ['lambda update-function-code'])
+        config = self.estado_actual()['lambda']['config']
+        self.assertEqual(config['CodeSha256'], self.sha_del_repo())
+        self.assertEqual(config['LastUpdateStatus'], 'Successful')
+        copias = self.copias_de_codigo()
+        self.assertEqual(len(copias), 1)
+        self.assertEqual(self.copias()[copias[0]], b'codigo anterior de prueba')
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.rb, 'rollback', copias[0])).st_mode), 0o600)
+        self.assertNotIn('X-Amz-Signature', visible)
+        self.assertNotIn('fake-code.example', visible)
+        self.assertIn('código de ork3d-resenas-admin actualizado', visible)
+
+    def test_con_flag_y_codigo_igual_no_actualiza(self):
+        self.assertEqual(self.correr().returncode, 0)
+        self.limpiar_log()
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1'})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
+        self.assertIn('existe y coincide (idempotente)', r.stdout)
+
+    def test_copia_que_no_coincide_con_codesha256_aborta_sin_escribir(self):
+        self.assertEqual(self.correr().returncode, 0)
+        self.poner_codigo_anterior()
+        otro = os.path.join(self.tmp, 'otro.zip')
+        with open(otro, 'wb') as f:
+            f.write(b'contenido distinto')
+        self.limpiar_log()
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1', 'FAKE_CODIGO_ANTERIOR_ARCHIVO': otro})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn('no coincide con su CodeSha256', r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
+        self.assertEqual(self.copias_de_codigo(), [])
+
+    def test_fallo_tras_update_indica_la_copia_de_rollback(self):
+        self.assertEqual(self.correr().returncode, 0)
+        self.poner_codigo_anterior()
+        self.limpiar_log()
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1', 'FAKE_CODIGO_ANTERIOR_ARCHIVO': self.anterior,
+                         'FAKE_ACTUALIZACION_FALLA': '1'})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), ['lambda update-function-code'])
+        self.assertIn('copia de rollback', r.stdout + r.stderr)
+        self.assertEqual(len(self.copias_de_codigo()), 1)
 
 
 class BehaviorAdminTest(unittest.TestCase):

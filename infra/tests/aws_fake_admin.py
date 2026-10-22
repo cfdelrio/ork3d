@@ -11,6 +11,7 @@ Variables de entorno:
   FAKE_ROL_TARDE=N     create-function falla N veces con InvalidParameterValueException (rol aún no asumible)
   FAKE_DIST_LENTO=N    tras update-distribution, get-distribution responde InProgress N veces
   FAKE_ORP_RECHAZO=1   create-origin-request-policy siempre falla con un mensaje con datos sensibles
+  FAKE_ACTUALIZACION_FALLA=1  update-function-code deja LastUpdateStatus=Failed (el waiter falla)
   (create-origin-request-policy también rechaza cabeceras x-amz-* en Headers.Items, como la primera prueba real)
 """
 import base64
@@ -221,6 +222,31 @@ def despachar(svc, op, o, pos, st):
     if (svc, op) == ('lambda', 'wait:function-active-v2'):
         if not st['lambda']:
             raise Fallo('ResourceNotFoundException', 'Function not found', op)
+        return None
+
+    if (svc, op) == ('lambda', 'get-function'):
+        if o.get('function-name') != FN_ADMIN or not st['lambda']:
+            raise Fallo('ResourceNotFoundException', 'Function not found', op)
+        # Location es una URL firmada de descarga: el script no debe imprimirla. Aquí lleva una firma falsa a propósito.
+        return {'Configuration': st['lambda']['config'],
+                'Code': {'RepositoryType': 'S3',
+                         'Location': 'https://fake-code.example/admin-codigo.zip?X-Amz-Signature=FAKE'}}
+
+    if (svc, op) == ('lambda', 'update-function-code'):
+        if not st['lambda']:
+            raise Fallo('ResourceNotFoundException', 'Function not found', op)
+        zip_bytes = leer_archivo(o['zip-file'], binario=True)
+        cfg = st['lambda']['config']
+        cfg['CodeSha256'] = base64.b64encode(hashlib.sha256(zip_bytes).digest()).decode('ascii')
+        cfg['LastUpdateStatus'] = 'Failed' if os.environ.get('FAKE_ACTUALIZACION_FALLA') == '1' else 'Successful'
+        st['lambda']['zip_bytes'] = len(zip_bytes)
+        return cfg
+
+    if (svc, op) == ('lambda', 'wait:function-updated-v2'):
+        if not st['lambda']:
+            raise Fallo('ResourceNotFoundException', 'Function not found', op)
+        if st['lambda']['config']['LastUpdateStatus'] != 'Successful':
+            raise Fallo('ResourceNotReadyException', 'Waiter FunctionUpdatedV2 failed: Max attempts exceeded', op)
         return None
 
     if (svc, op) == ('lambda', 'create-function-url-config'):

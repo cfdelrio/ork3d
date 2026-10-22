@@ -65,6 +65,17 @@ def main():
         else:
             url = a
             i += 1
+    if 'fake-code.example' in url:
+        # Descarga del código anterior de la Lambda (URL firmada de Lambda). Sirve el archivo de FAKE_CODIGO_ANTERIOR_ARCHIVO.
+        origen = os.environ.get('FAKE_CODIGO_ANTERIOR_ARCHIVO', '')
+        if not origen or not os.path.exists(origen):
+            return 6
+        with open(origen, 'rb') as f:
+            contenido = f.read()
+        if salida:
+            with open(salida, 'wb') as f:
+                f.write(contenido)
+        return 0
     ruta = url.split('ork3d.com', 1)[-1]
     cabeceras, cuerpo = leer_cabeceras_y_cuerpo(args)
     if os.environ.get('FAKE_LOG'):

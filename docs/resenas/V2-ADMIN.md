@@ -502,3 +502,50 @@ Regla implementada en `assets/js/admin-comun.js`, función `llamar()`:
 
 Las búsquedas devolvieron resúmenes de la documentación de AWS. Las páginas primarias no fueron accesibles desde
 el sandbox (bloqueo de egreso). Por eso los puntos de arriba quedan como gates y no como verificados.
+
+### 16.5 Routing real con eventos de Function URL (payload v2)
+
+La Lambda recibe el path completo: CloudFront no reescribe `/admin/api`, y la Function URL entrega
+`rawPath` y `requestContext.http.path` con `/admin/api/...`. El router (`_despachar` en `admin_app.py`) compara
+ese path completo; no hace falta normalizarlo. `evento_a_entrada` toma el método de `requestContext.http.method`
+y el path de `rawPath` (sin barra final); `path` se usa solo como respaldo para eventos sin `rawPath`.
+
+`api/resenas/test_routing_v2.py` construye eventos con esa forma y los pasa por el mismo adaptador que `handler()`:
+
+| Petición | Resultado esperado | Efectos |
+|---|---|---|
+| `GET /admin/api/sesion` sin cookie | 401 `no_autenticado` | ninguno |
+| `POST /admin/api/sesion/solicitar` sin `Origin` | 403 de la app (`_csrf` antes que cualquier otra cosa) | ningún correo |
+| `POST /admin/api/sesion/solicitar` válido | 202 | exactamente un correo |
+| `POST /admin/api/sesion/solicitar/extra`, `/admin/api2/...` | 404 de la app | ningún correo |
+| `GET /admin/api/sesion/solicitar` | 405 | ningún correo |
+
+Un 404 de la app trae JSON con `"ok": false` y `"error": "no_encontrado"`. Un 404 de CloudFront o de la Function URL
+no trae ese formato. El smoke de §10 lo indica en el mensaje de error: si el 401 o el 403 no tienen el formato de la
+app, el problema está en el borde (CloudFront o Function URL), no en el router.
+
+### 16.6 Actualización de código de la Lambda admin
+
+`infra/admin-deploy.sh` es idempotente. Compara la configuración de la Lambda (`lambda-coincide`) y su
+`CodeSha256` contra el paquete del repo (`codigo-coincide`). El paquete son `admin_app.py` y `nucleo/*.py`,
+en zip determinista.
+
+- Si todo coincide: no escribe nada.
+- Si la configuración difiere: aborta con código 4 sin escribir, como antes.
+- Si solo el código difiere: sin `ALLOW_ADMIN_CODE_UPDATE=1`, aborta con código 4 sin escribir. Con el flag:
+  1. Lee la URL de descarga del código actual (`lambda get-function`). La URL firmada no se imprime.
+  2. Descarga el zip actual y verifica su SHA-256 contra el `CodeSha256` de la Lambda. Si no coincide, aborta
+     antes de cualquier escritura.
+  3. Guarda la copia en `rollback/lambda-admin-codigo-anterior.<ejecución>.zip` (600).
+  4. Ejecuta `update-function-code` con el zip del repo, espera `function-updated-v2` y verifica
+     `CodeSha256`, `LastUpdateStatus` y la configuración.
+- No toca rol, Function URL, permisos, variables, CloudFront ni la Lambda pública.
+
+Limitación: el rollback es manual. Si `update-function-code` o su espera fallan, el script sale con código 1 e
+informa la copia. Para volver al código anterior:
+`aws lambda update-function-code --function-name ork3d-resenas-admin --zip-file fileb://<copia>`, y después
+verificar `CodeSha256` con `sha-archivo`. El script no revierte solo: no improvisa una segunda escritura sobre
+una función cuyo estado no se pudo confirmar.
+
+El zip del repo hoy tiene el `CodeSha256` que empieza con `FggkLhdVTANU…` (verificado con `zip`, sin AWS). Este
+fix no cambia `admin_app.py` ni `nucleo/`, así que el próximo deploy no actualiza el código.

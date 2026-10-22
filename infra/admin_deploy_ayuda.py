@@ -6,7 +6,9 @@ Subcomandos (los códigos de salida son los que usa el script):
   zip RAIZ SALIDA                          imprime el CodeSha256 del paquete (base64)
   env SALIDA                               variables de la Lambda desde el entorno (no imprime valores)
   bucket-privado CONFIG_LAMBDA             imprime RESENAS_BUCKET de la respuesta de get-function-configuration
-  lambda-coincide CONFIG_LAMBDA SHA [ENV]  exit 0 si la función admin coincide; 1 si difiere (motivos sin valores)
+  lambda-coincide CONFIG_LAMBDA SHA [ENV]  exit 0 si configuración y variables coinciden (sin el hash del código)
+  codigo-coincide CONFIG_LAMBDA SHA        exit 0 si el CodeSha256 es el del paquete; 1 si difiere
+  sha-archivo ARCHIVO                      CodeSha256 de un archivo
   politica-coincide ACTUAL ESPERADA        exit 0 si los documentos IAM son iguales (orden de Statement ignorado)
   recurso-coincide TIPO LISTA NOMBRE       TIPO oac|orp. Imprime el ID si coincide; exit 4 si no existe; 1 si difiere
   dist-analizar CONFIG_DIST                imprime el estado de origen y behavior; exit 5 si hay conflicto de patrones
@@ -141,11 +143,25 @@ def lambda_coincide(config, sha, env_esperado=None):
         distintas = sorted(k for k in esperadas if k in actuales and actuales[k] != esperadas[k])
         if distintas:
             motivos.append(f'valores distintos en {distintas} (no se muestran)')
-    if cfg.get('CodeSha256') != sha:
-        motivos.append('código distinto del paquete del repo')
     for motivo in motivos:
         print('DIFIERE: ' + motivo)
     return 0 if not motivos else 1
+
+
+def codigo_coincide(config, sha):
+    """0 si el CodeSha256 de la función es el del paquete del repo; 1 si difiere (la función debe actualizarse)."""
+    actual = cargar(config).get('CodeSha256')
+    if actual == sha:
+        return 0
+    print('CODIGO_DISTINTO')
+    return 1
+
+
+def sha_archivo(ruta):
+    """CodeSha256 de un archivo (base64 del SHA-256), como lo informa Lambda."""
+    with open(ruta, 'rb') as f:
+        print(base64.b64encode(hashlib.sha256(f.read()).digest()).decode('ascii'))
+    return 0
 
 
 def normalizar_politica(doc):
@@ -471,6 +487,10 @@ def main(argv):
         return 0
     if orden == 'lambda-coincide':
         return lambda_coincide(*args)
+    if orden == 'codigo-coincide':
+        return codigo_coincide(*args)
+    if orden == 'sha-archivo':
+        return sha_archivo(*args)
     if orden == 'politica-coincide':
         return politica_coincide(*args)
     if orden == 'recurso-coincide':

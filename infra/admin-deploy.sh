@@ -287,12 +287,20 @@ else
 fi
 
 LAMBDA_EXISTE=no
+CODIGO_ACTUALIZAR=no
 if "$AWS" lambda get-function-configuration --function-name "$FN_ADMIN" --output json > "$T/admin.json" 2> "$T/admin.err"; then
   LAMBDA_EXISTE=si
   [[ "$ROL_EXISTE" == si ]] || distinto "la Lambda $FN_ADMIN existe sin el rol $ROL: estado inconsistente"
   python3 "$AYUDA" lambda-coincide "$T/admin.json" "$SHA" "$T/env.json" \
     || distinto "la Lambda $FN_ADMIN existe y no coincide con el repo (motivos arriba)"
-  echo "  Lambda $FN_ADMIN: existe y coincide (idempotente)"
+  if python3 "$AYUDA" codigo-coincide "$T/admin.json" "$SHA" > /dev/null; then
+    echo "  Lambda $FN_ADMIN: existe y coincide (idempotente)"
+  else
+    [[ "${ALLOW_ADMIN_CODE_UPDATE:-}" == "1" ]] \
+      || distinto "el código de $FN_ADMIN difiere del paquete del repo: para actualizar solo el código, ALLOW_ADMIN_CODE_UPDATE=1"
+    CODIGO_ACTUALIZAR=si
+    echo "  Lambda $FN_ADMIN: configuración coincide; el código difiere (CodeSha256 distinto). Se actualiza solo el código."
+  fi
 else
   [[ "$(codigo "$T/admin.err")" == ResourceNotFoundException ]] || fallo "no se pudo leer $FN_ADMIN (código $(detalle "$T/admin.err"))"
   echo "  Lambda $FN_ADMIN: no existe"
@@ -315,6 +323,17 @@ if [[ "$LAMBDA_EXISTE" == si ]]; then
   fi
   PERM="$(python3 "$AYUDA" permisos "$T/admin-policy.json" "$DIST_ARN")" \
     || distinto "permisos de CloudFront en $FN_ADMIN: $PERM"
+fi
+
+# Código anterior de la Lambda: copia de rollback ANTES de cualquier escritura. La URL firmada (Code.Location) no se imprime.
+if [[ $CODIGO_ACTUALIZAR == si ]]; then
+  "$AWS" lambda get-function --function-name "$FN_ADMIN" --output json > "$T/fn-codigo.json" 2> "$T/fn-codigo.err" \
+    || fallo "no se pudo leer el código actual de $FN_ADMIN (código $(detalle "$T/fn-codigo.err"))"
+  "$CURL" -sS -o "$T/codigo-anterior.zip" "$(valor "$T/fn-codigo.json" Code.Location)" 2> "$T/codigo-dl.err" \
+    || fallo "no se pudo descargar el código actual de $FN_ADMIN para la copia de rollback (URL firmada no mostrada)"
+  [[ "$(python3 "$AYUDA" sha-archivo "$T/codigo-anterior.zip")" == "$(valor "$T/admin.json" CodeSha256)" ]] \
+    || fallo "el código descargado de $FN_ADMIN no coincide con su CodeSha256: no se actualiza"
+  guardar_rollback lambda-admin-codigo-anterior.zip "$T/codigo-anterior.zip"
 fi
 
 "$AWS" cloudfront list-origin-access-controls --output json > "$T/oac-list.json" 2> /dev/null || fallo "no se pudo listar los OAC"
@@ -354,6 +373,7 @@ paso "8. Plan (lo que se escribe)"
 [[ $ROL_EXISTE == si && $ADJ_OK == falta ]] && echo "  adjuntar AWSLambdaBasicExecutionRole a $ROL"
 [[ $ROL_EXISTE == si && $POL_EXISTE == no ]] && echo "  agregar política $POLITICA_ROL a $ROL"
 [[ $LAMBDA_EXISTE == no ]] && echo "  crear Lambda $FN_ADMIN (python3.12, admin_app.handler, 256 MB, 10 s)"
+[[ $CODIGO_ACTUALIZAR == si ]] && echo "  actualizar solo el código de $FN_ADMIN (update-function-code; copia de rollback del código anterior)"
 [[ $URL_EXISTE == no ]] && echo "  crear Function URL AWS_IAM en $FN_ADMIN"
 [[ $PERM == ninguno ]] && echo "  agregar 2 permisos de CloudFront (InvokeFunctionUrl e InvokeFunction)"
 [[ $OAC_EXISTE == no ]] && echo "  crear OAC $OAC_NOMBRE (sigv4, always, lambda)"
@@ -416,7 +436,24 @@ if [[ $LAMBDA_EXISTE == no ]]; then
   "$AWS" lambda get-function-configuration --function-name "$FN_ADMIN" --output json > "$T/admin.json" 2> /dev/null \
     || fallo "no se pudo releer $FN_ADMIN"
   python3 "$AYUDA" lambda-coincide "$T/admin.json" "$SHA" "$T/env.json" || fallo "$FN_ADMIN creada no coincide con lo esperado"
+  python3 "$AYUDA" codigo-coincide "$T/admin.json" "$SHA" > /dev/null || fallo "$FN_ADMIN creada tiene otro CodeSha256 que el paquete del repo"
   echo "  $FN_ADMIN creada: Active · Successful"
+fi
+
+# Actualización solo de código (ALLOW_ADMIN_CODE_UPDATE=1, ya verificada la copia de rollback). No toca rol, Function URL,
+# permisos, variables ni CloudFront. Si falla después de update-function-code, el código anterior está en la copia de rollback.
+if [[ $CODIGO_ACTUALIZAR == si ]]; then
+  "$AWS" lambda update-function-code --function-name "$FN_ADMIN" --zip-file "fileb://$T/admin.zip" --output json \
+    > "$T/upd.json" 2> "$T/upd.err" || fallo "update-function-code ($(detalle "$T/upd.err")); código anterior en la copia de rollback"
+  "$AWS" lambda wait function-updated-v2 --function-name "$FN_ADMIN" 2> "$T/w2.err" \
+    || fallo "$FN_ADMIN no llegó a Successful tras actualizar el código ($(detalle "$T/w2.err")); código anterior en la copia de rollback"
+  "$AWS" lambda get-function-configuration --function-name "$FN_ADMIN" --output json > "$T/admin.json" 2> /dev/null \
+    || fallo "no se pudo releer $FN_ADMIN tras actualizar el código"
+  python3 "$AYUDA" codigo-coincide "$T/admin.json" "$SHA" > /dev/null \
+    || fallo "$FN_ADMIN no tiene el CodeSha256 del paquete del repo tras la actualización"
+  python3 "$AYUDA" lambda-coincide "$T/admin.json" "$SHA" "$T/env.json" \
+    || fallo "$FN_ADMIN no coincide con lo esperado tras actualizar el código"
+  echo "  código de $FN_ADMIN actualizado: CodeSha256 ${SHA:0:12}… · Successful"
 fi
 "$AWS" lambda get-function-concurrency --function-name "$FN_ADMIN" --output json > "$T/conc.json" 2> /dev/null
 [[ -s "$T/conc.json" ]] || echo '{}' > "$T/conc.json"
@@ -511,7 +548,8 @@ echo "CHECKPOINT 5 — CloudFront Deployed"
 CODIGO_A="$($CURL -sS -o "$T/a.body" -w '%{http_code}' "$BASE/admin/api/sesion")" \
   || fallo "no se pudo llamar a $BASE/admin/api/sesion"
 if [[ "$CODIGO_A" != 401 ]] || ! grep -q no_autenticado "$T/a.body"; then
-  echo "ERROR: GET /admin/api/sesion sin cookie → $CODIGO_A (se esperaba 401 de la API, con no_autenticado)." >&2
+  if grep -q '"ok": false' "$T/a.body"; then ORIGEN_A="con formato de la app"; else ORIGEN_A="sin formato de la app (probable CloudFront o Function URL)"; fi
+  echo "ERROR: GET /admin/api/sesion sin cookie → $CODIGO_A, respuesta $ORIGEN_A (se esperaba 401 de la API, con no_autenticado)." >&2
   exit 6
 fi
 echo "CHECKPOINT 6 — GET sesión 401"
@@ -524,7 +562,8 @@ CODIGO_C="$($CURL -sS -o "$T/c.body" -w '%{http_code}' -X POST \
   --data-binary "@$T/vacio.json" "$BASE/admin/api/sesion/solicitar")" \
   || fallo "no se pudo llamar a $BASE/admin/api/sesion/solicitar"
 if [[ "$CODIGO_C" != 403 ]] || ! grep -q '"ok": false' "$T/c.body"; then
-  echo "ERROR: POST /admin/api/sesion/solicitar sin Origin → $CODIGO_C (se esperaba 403 de la API)." >&2
+  if grep -q '"ok": false' "$T/c.body"; then ORIGEN_C="con formato de la app"; else ORIGEN_C="sin formato de la app (probable CloudFront o Function URL)"; fi
+  echo "ERROR: POST /admin/api/sesion/solicitar sin Origin → $CODIGO_C, respuesta $ORIGEN_C (se esperaba 403 de la API)." >&2
   exit 6
 fi
 echo "CHECKPOINT 6B — CSRF negativo 403 (rechazado antes de enviar correo)"
