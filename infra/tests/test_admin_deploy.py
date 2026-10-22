@@ -94,7 +94,8 @@ class DespliegueTest(unittest.TestCase):
             return [linea.strip() for linea in f if linea.strip()]
 
     def mutantes(self):
-        return [l for l in self.llamadas() if any(m in l for m in MUTANTES)]
+        # Solo servicio y operación: los detalles (if-match=, etag=) no cuentan como otra llamada.
+        return [' '.join(l.split()[:2]) for l in self.llamadas() if any(m in l for m in MUTANTES)]
 
     def peticiones(self):
         if not os.path.exists(self.peticiones_path):
@@ -235,6 +236,7 @@ class CaminoFelizTest(DespliegueTest):
         self.assertEqual(llam[-1], 'curl POST /admin/api/sesion/solicitar')
         self.assertEqual(llam[-2], 'curl GET /admin/api/sesion')
         self.assertEqual(self.mutantes()[-1], 'cloudfront update-distribution')
+        self.assertEqual(self.mutantes().count('cloudfront update-distribution'), 1)
 
         st = self.estado_actual()
         self.assertEqual(sorted(st['lambda']['config']['Environment']['Variables']),
@@ -295,6 +297,13 @@ class CaminoFelizTest(DespliegueTest):
         self.assertEqual(b['AllowedMethods']['Quantity'], 7)
         self.assertIn('POST', b['AllowedMethods']['Items'])
         self.assertEqual(b['AllowedMethods']['CachedMethods']['Items'], ['GET', 'HEAD'])
+        self.assertIs(b['SmoothStreaming'], False)
+        self.assertEqual(b['TrustedSigners'], {'Enabled': False, 'Quantity': 0})
+        self.assertEqual(b['TrustedKeyGroups'], {'Enabled': False, 'Quantity': 0})
+        self.assertEqual(b['LambdaFunctionAssociations'], {'Quantity': 0})
+        self.assertEqual(b['FunctionAssociations'], {'Quantity': 0})
+        self.assertEqual(b['FieldLevelEncryptionId'], '')
+        self.assertIs(b['Compress'], True)
 
     def test_default_origen_s3_y_behaviors_previos_no_cambian(self):
         antes = self.estado_actual()['dist']['config']
@@ -701,6 +710,157 @@ class RerunConRecursosExistentesTest(DespliegueTest):
         self.assertNotIn('AKIA', visible)
         self.assertNotIn('X-Amz-Signature', visible)
         self.assertEqual(self.mutantes()[-1:], ['cloudfront create-origin-request-policy'])
+
+
+class BehaviorAdminTest(unittest.TestCase):
+    """Forma del CacheBehavior de /admin/api/*. Sin AWS."""
+
+    def setUp(self):
+        self.b = ayuda.behavior_admin('ORP-DE-PRUEBA')
+
+    def test_smooth_streaming_existe_es_booleano_y_false(self):
+        self.assertIn('SmoothStreaming', self.b)
+        self.assertIs(self.b['SmoothStreaming'], False)
+
+    def test_trusted_signers_vacio(self):
+        self.assertEqual(self.b['TrustedSigners'], {'Enabled': False, 'Quantity': 0})
+
+    def test_trusted_key_groups_vacio(self):
+        self.assertEqual(self.b['TrustedKeyGroups'], {'Enabled': False, 'Quantity': 0})
+
+    def test_lambda_function_associations_vacio(self):
+        self.assertEqual(self.b['LambdaFunctionAssociations'], {'Quantity': 0})
+
+    def test_function_associations_vacio(self):
+        self.assertEqual(self.b['FunctionAssociations'], {'Quantity': 0})
+
+    def test_field_level_encryption_id_es_cadena_vacia(self):
+        self.assertIn('FieldLevelEncryptionId', self.b)
+        self.assertIsInstance(self.b['FieldLevelEncryptionId'], str)
+        self.assertEqual(self.b['FieldLevelEncryptionId'], '')
+
+    def test_allowed_methods_tiene_los_siete_metodos_con_post(self):
+        self.assertEqual(self.b['AllowedMethods']['Quantity'], 7)
+        self.assertEqual(sorted(self.b['AllowedMethods']['Items']),
+                         sorted(['GET', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'POST', 'DELETE']))
+
+    def test_cached_methods_get_y_head(self):
+        self.assertEqual(self.b['AllowedMethods']['CachedMethods'], {'Quantity': 2, 'Items': ['GET', 'HEAD']})
+
+    def test_cache_policy_es_caching_disabled(self):
+        self.assertEqual(self.b['CachePolicyId'], '4135ea2d-6df8-44a3-9df3-4b5a84be39ad')
+
+    def test_origin_request_policy_es_la_pasada(self):
+        self.assertEqual(self.b['OriginRequestPolicyId'], 'ORP-DE-PRUEBA')
+
+    def test_viewer_protocol_redirect_to_https(self):
+        self.assertEqual(self.b['ViewerProtocolPolicy'], 'redirect-to-https')
+
+    def test_compress_true(self):
+        self.assertIs(self.b['Compress'], True)
+
+    def test_path_y_origen(self):
+        self.assertEqual((self.b['PathPattern'], self.b['TargetOriginId']), ('/admin/api/*', 'resenas-admin-lambda'))
+
+
+class ActualizacionCloudFrontTest(DespliegueTest):
+    def config_con_behavior(self, behavior):
+        cfg = fake.configuracion_distribucion()
+        cfg['CacheBehaviors']['Items'].append(behavior)
+        cfg['CacheBehaviors']['Quantity'] = len(cfg['CacheBehaviors']['Items'])
+        return cfg
+
+    def update_directo(self, cfg, if_match='E2TAGDEMO'):
+        with tempfile.TemporaryDirectory() as tmp:
+            ruta = os.path.join(tmp, 'cfg.json')
+            with open(ruta, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f)
+            with open(self.estado, 'w', encoding='utf-8') as f:
+                json.dump(fake.estado_inicial(), f)
+            return subprocess.run([sys.executable, FAKE_AWS, 'cloudfront', 'update-distribution', '--id', 'ECOW0H6A48HVP',
+                                   '--if-match', if_match, '--distribution-config', f'file://{ruta}'],
+                                  env={'FAKE_ESTADO': self.estado, 'PATH': os.environ.get('PATH', '')},
+                                  capture_output=True, text=True)
+
+    def behavior_admin(self):
+        return ayuda.behavior_admin('ORP-DE-PRUEBA')
+
+    def test_sin_smooth_streaming_cloudfront_rechaza_con_el_mensaje_real(self):
+        b = self.behavior_admin()
+        del b['SmoothStreaming']
+        r = self.update_directo(self.config_con_behavior(b))
+        self.assertEqual(r.returncode, 255)
+        self.assertIn('InvalidArgument', r.stderr)
+        self.assertIn('The parameter SmoothStreaming flag is missing.', r.stderr)
+
+    def test_behavior_con_forma_completa_se_acepta(self):
+        r = self.update_directo(self.config_con_behavior(self.behavior_admin()))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_fake_detecta_bloques_faltantes_sin_esperar_a_aws(self):
+        for campo in ('TrustedSigners', 'TrustedKeyGroups', 'LambdaFunctionAssociations', 'FunctionAssociations',
+                      'FieldLevelEncryptionId', 'Compress'):
+            with self.subTest(campo=campo):
+                b = self.behavior_admin()
+                del b[campo]
+                r = self.update_directo(self.config_con_behavior(b))
+                self.assertEqual(r.returncode, 255)
+                self.assertIn(f'The parameter {campo} is missing.', r.stderr)
+
+    def test_fake_detecta_allowed_methods_sin_cached_methods(self):
+        b = self.behavior_admin()
+        del b['AllowedMethods']['CachedMethods']
+        r = self.update_directo(self.config_con_behavior(b))
+        self.assertEqual(r.returncode, 255)
+        self.assertIn('CachedMethods is missing', r.stderr)
+
+    def test_rerun_con_orp_existente_no_crea_otra_y_actualiza_una_vez(self):
+        self.assertEqual(self.correr().returncode, 0)
+
+        def deshacer_solo_cloudfront(st):
+            st['dist']['config'] = fake.configuracion_distribucion()
+            st['dist']['etag'] = 'E2TAGDEMO'
+            st['dist']['estado'] = 'Deployed'
+            st['dist']['pendientes'] = 0
+        self.modificar_estado(deshacer_solo_cloudfront)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        r = self.correr()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn('cloudfront create-origin-request-policy', self.mutantes())
+        self.assertEqual(self.mutantes(), ['cloudfront update-distribution'])
+        self.assertIn('existe y coincide', r.stdout)
+        self.assertEqual(len(self.estado_actual()['orps']), 1)
+
+    def test_if_match_usa_el_etag_leido_justo_antes_del_update(self):
+        self.assertEqual(self.correr().returncode, 0)
+        def cloudfront_sin_origin_admin(st):
+            # Estado previo al update: sin origin ni behavior admin, ETag nuevo; la ORP ya existe.
+            st['dist'].update({'config': fake.configuracion_distribucion(), 'etag': 'E2OTRO',
+                               'estado': 'Deployed', 'pendientes': 0})
+        self.modificar_estado(cloudfront_sin_origin_admin)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        self.assertEqual(self.correr().returncode, 0)
+        lineas = self.llamadas()
+        idx = next(i for i, l in enumerate(lineas) if l.startswith('cloudfront update-distribution'))
+        match = lineas[idx].split('if-match=')[1]
+        previo = [l for l in lineas[:idx] if l.startswith('cloudfront get-distribution-config')][-1]
+        self.assertEqual(previo.split('etag=')[1], match)
+        self.assertEqual(match, 'E2OTRO')
+
+    def test_existentes_no_cambian_en_el_camino_feliz(self):
+        antes = self.estado_actual()['dist']['config']
+        self.assertEqual(self.correr().returncode, 0)
+        despues = self.estado_actual()['dist']['config']
+        self.assertEqual(antes['DefaultCacheBehavior'], despues['DefaultCacheBehavior'])
+        self.assertEqual(antes['Origins']['Items'], [o for o in despues['Origins']['Items'] if o['Id'] != 'resenas-admin-lambda'])
+        self.assertEqual(antes['CacheBehaviors']['Items'],
+                         [b for b in despues['CacheBehaviors']['Items'] if b['PathPattern'] != '/admin/api/*'])
+        self.assertEqual(len([o for o in despues['Origins']['Items'] if o['Id'] == 'resenas-admin-lambda']), 1)
+        self.assertEqual(len([b for b in despues['CacheBehaviors']['Items'] if b['PathPattern'] == '/admin/api/*']), 1)
+        self.assertEqual(despues['CacheBehaviors']['Quantity'], len(despues['CacheBehaviors']['Items']))
+        self.assertEqual(despues['Origins']['Quantity'], len(despues['Origins']['Items']))
 
 
 if __name__ == '__main__':

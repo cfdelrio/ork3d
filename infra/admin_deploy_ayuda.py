@@ -210,11 +210,44 @@ def origen_admin(host, oac):
 
 
 def behavior_admin(orp):
+    """CacheBehavior de /admin/api/*. Forma completa y explícita: CloudFront rechazó el behavior sin SmoothStreaming.
+
+    Los campos vacíos se escriben a propósito (no se confía en defaults): TrustedSigners, TrustedKeyGroups,
+    LambdaFunctionAssociations y FunctionAssociations con Quantity 0, y FieldLevelEncryptionId ''.
+    """
     return {'PathPattern': PATRON, 'TargetOriginId': ORIGEN_ID, 'ViewerProtocolPolicy': 'redirect-to-https',
-            'AllowedMethods': {'Quantity': 7, 'Items': ['GET', 'HEAD', 'OPTIONS', 'PUT', 'POST', 'PATCH', 'DELETE'],
+            'AllowedMethods': {'Quantity': 7, 'Items': ['GET', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'POST', 'DELETE'],
                                'CachedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD']}},
-            'CachePolicyId': CACHE_DESHABILITADO, 'OriginRequestPolicyId': orp, 'Compress': False,
-            'FunctionAssociations': {'Quantity': 0}, 'LambdaFunctionAssociations': {'Quantity': 0}}
+            'CachePolicyId': CACHE_DESHABILITADO, 'OriginRequestPolicyId': orp, 'Compress': True,
+            'SmoothStreaming': False,
+            'TrustedSigners': {'Enabled': False, 'Quantity': 0},
+            'TrustedKeyGroups': {'Enabled': False, 'Quantity': 0},
+            'LambdaFunctionAssociations': {'Quantity': 0},
+            'FunctionAssociations': {'Quantity': 0},
+            'FieldLevelEncryptionId': ''}
+
+
+CAMPOS_BEHAVIOR_SEMANTICOS = ('PathPattern', 'TargetOriginId', 'ViewerProtocolPolicy', 'CachePolicyId',
+                              'OriginRequestPolicyId', 'Compress', 'SmoothStreaming')
+
+
+def behavior_equivalente(existente, esperado):
+    """True si el behavior existente tiene lo que controlamos. No compara campos que CloudFront completa solo."""
+    for campo in CAMPOS_BEHAVIOR_SEMANTICOS:
+        if existente.get(campo) != esperado.get(campo):
+            return False
+    ea, ee = existente.get('AllowedMethods') or {}, esperado['AllowedMethods']
+    if sorted(ea.get('Items', [])) != sorted(ee['Items']):
+        return False
+    if sorted((ea.get('CachedMethods') or {}).get('Items', [])) != sorted(ee['CachedMethods']['Items']):
+        return False
+    for bloque in ('TrustedSigners', 'TrustedKeyGroups'):
+        if (existente.get(bloque) or {}).get('Enabled') is not False or (existente.get(bloque) or {}).get('Quantity') != 0:
+            return False
+    for bloque in ('LambdaFunctionAssociations', 'FunctionAssociations'):
+        if (existente.get(bloque) or {}).get('Quantity', 0) != 0:
+            return False
+    return True
 
 
 def _items(bloque):
@@ -259,7 +292,7 @@ def dist_nueva(config, salida, host, oac, orp):
             return 4
     if beh_ok:
         existente = [b for b in behaviors if b.get('PathPattern') == PATRON][0]
-        if existente != behavior_admin(orp):
+        if not behavior_equivalente(existente, behavior_admin(orp)):
             print('ERROR: el behavior ' + PATRON + ' ya existe con otra configuración', file=sys.stderr)
             return 4
     if not origen_ok:
@@ -280,10 +313,9 @@ def dist_verificar(antes, despues, orp):
     errores = []
     if a.get('DefaultCacheBehavior') != d.get('DefaultCacheBehavior'):
         errores.append('el default behavior cambió')
-    s3_a = [o for o in _items(a.get('Origins')) if o.get('S3OriginConfig') is not None]
-    s3_d = [o for o in _items(d.get('Origins')) if o.get('S3OriginConfig') is not None]
-    if s3_a != s3_d:
-        errores.append('el origen S3 cambió')
+    origenes_previos_d = [o for o in _items(d.get('Origins')) if o.get('Id') != ORIGEN_ID]
+    if _items(a.get('Origins')) != origenes_previos_d:
+        errores.append('algún origin existente cambió')
     previos_a = _items(a.get('CacheBehaviors'))
     previos_d = [b for b in _items(d.get('CacheBehaviors')) if b.get('PathPattern') != PATRON]
     if previos_a != previos_d:
@@ -293,12 +325,10 @@ def dist_verificar(antes, despues, orp):
         errores.append(f'se esperaba un behavior {PATRON}, hay {len(nuevos)}')
     else:
         b = nuevos[0]
-        if b.get('TargetOriginId') != ORIGEN_ID or b.get('OriginRequestPolicyId') != orp:
-            errores.append('behavior admin con origen o política incorrectos')
-        if b.get('CachePolicyId') != CACHE_DESHABILITADO:
-            errores.append('behavior admin sin CachingDisabled')
-        if b.get('ViewerProtocolPolicy') != 'redirect-to-https':
-            errores.append('behavior admin sin redirect-to-https')
+        if not behavior_equivalente(b, behavior_admin(orp)):
+            errores.append('behavior admin con origen, política o campos distintos de los esperados')
+        if b.get('SmoothStreaming') is not False:
+            errores.append('behavior admin sin SmoothStreaming=false')
         if 'POST' not in (b.get('AllowedMethods') or {}).get('Items', []):
             errores.append('behavior admin sin POST')
     for e in errores:

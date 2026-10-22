@@ -45,6 +45,17 @@ class Fallo(Exception):
         self.codigo, self.msg, self.op = codigo, mensaje, op
 
 
+def _comportamiento_completo(**campos):
+    """Forma serializada que CloudFront devuelve para un behavior leído: todos los bloques, incluso vacíos."""
+    base = {'Compress': True, 'SmoothStreaming': False,
+            'TrustedSigners': {'Enabled': False, 'Quantity': 0},
+            'TrustedKeyGroups': {'Enabled': False, 'Quantity': 0},
+            'LambdaFunctionAssociations': {'Quantity': 0}, 'FunctionAssociations': {'Quantity': 0},
+            'FieldLevelEncryptionId': ''}
+    base.update(campos)
+    return base
+
+
 def configuracion_distribucion():
     return {
         'CallerReference': 'deploy-test', 'Aliases': {'Quantity': 1, 'Items': ['ork3d.com']},
@@ -53,21 +64,38 @@ def configuracion_distribucion():
             'Id': 'sitio', 'DomainName': 'ork3d.com.s3.us-east-1.amazonaws.com', 'OriginPath': '',
             'S3OriginConfig': {'OriginAccessIdentity': ''}, 'OriginAccessControlId': 'E1OACDEMO',
             'CustomHeaders': {'Quantity': 0}}]},
-        'DefaultCacheBehavior': {
-            'TargetOriginId': 'sitio', 'ViewerProtocolPolicy': 'redirect-to-https', 'CachePolicyId': CACHE_OPTIMIZADO,
-            'AllowedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD'],
-                               'CachedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD']}},
-            'Compress': True,
-            'FunctionAssociations': {'Quantity': 1, 'Items': [{
-                'EventType': 'viewer-request', 'FunctionARN': f'arn:aws:cloudfront::{ACC}:function/ork3d-redirect-www'}]},
-            'LambdaFunctionAssociations': {'Quantity': 0}},
-        'CacheBehaviors': {'Quantity': 1, 'Items': [{
-            'PathPattern': '/opinar*', 'TargetOriginId': 'sitio', 'ViewerProtocolPolicy': 'redirect-to-https',
-            'CachePolicyId': CACHE_OPTIMIZADO,
-            'AllowedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD'],
-                               'CachedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD']}},
-            'Compress': True, 'FunctionAssociations': {'Quantity': 0}, 'LambdaFunctionAssociations': {'Quantity': 0}}]},
+        'DefaultCacheBehavior': _comportamiento_completo(
+            TargetOriginId='sitio', ViewerProtocolPolicy='redirect-to-https', CachePolicyId=CACHE_OPTIMIZADO,
+            AllowedMethods={'Quantity': 2, 'Items': ['GET', 'HEAD'],
+                            'CachedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD']}},
+            FunctionAssociations={'Quantity': 1, 'Items': [{
+                'EventType': 'viewer-request', 'FunctionARN': f'arn:aws:cloudfront::{ACC}:function/ork3d-redirect-www'}]}),
+        'CacheBehaviors': {'Quantity': 1, 'Items': [_comportamiento_completo(
+            PathPattern='/opinar*', TargetOriginId='sitio', ViewerProtocolPolicy='redirect-to-https',
+            CachePolicyId=CACHE_OPTIMIZADO,
+            AllowedMethods={'Quantity': 2, 'Items': ['GET', 'HEAD'],
+                            'CachedMethods': {'Quantity': 2, 'Items': ['GET', 'HEAD']}})]},
     }
+
+
+# Campos que CloudFront exige en un CacheBehavior nuevo. Sin ellos, UpdateDistribution falla (SmoothStreaming, primero).
+CAMPOS_REQUERIDOS_BEHAVIOR = ('SmoothStreaming', 'Compress', 'TrustedSigners', 'TrustedKeyGroups',
+                              'LambdaFunctionAssociations', 'FunctionAssociations', 'FieldLevelEncryptionId')
+
+
+def validar_behavior_nuevo(behavior):
+    for campo in CAMPOS_REQUERIDOS_BEHAVIOR:
+        if campo not in behavior:
+            raise Fallo('InvalidArgument', f'The parameter {campo} flag is missing.' if campo == 'SmoothStreaming'
+                        else f'The parameter {campo} is missing.', 'UpdateDistribution')
+    if not isinstance(behavior['SmoothStreaming'], bool):
+        raise Fallo('InvalidArgument', 'The parameter SmoothStreaming must be a boolean.', 'UpdateDistribution')
+    for bloque in ('TrustedSigners', 'TrustedKeyGroups'):
+        if set(behavior[bloque]) < {'Enabled', 'Quantity'}:
+            raise Fallo('InvalidArgument', f'The parameter {bloque} is incomplete.', 'UpdateDistribution')
+    am = behavior.get('AllowedMethods') or {}
+    if 'CachedMethods' not in am:
+        raise Fallo('InvalidArgument', 'The parameter CachedMethods is missing.', 'UpdateDistribution')
 
 
 def estado_inicial():
@@ -317,7 +345,12 @@ def despachar(svc, op, o, pos, st):
     if (svc, op) == ('cloudfront', 'update-distribution'):
         if o.get('if-match') != st['dist']['etag']:
             raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid', op)
-        st['dist']['config'] = json.loads(leer_archivo(o['distribution-config']))
+        nueva = json.loads(leer_archivo(o['distribution-config']))
+        previos = {b['PathPattern'] for b in st['dist']['config']['CacheBehaviors'].get('Items', [])}
+        for b in nueva['CacheBehaviors'].get('Items', []):
+            if b['PathPattern'] not in previos:
+                validar_behavior_nuevo(b)
+        st['dist']['config'] = nueva
         st['dist']['etag'] = 'E' + uuid.uuid4().hex[:12].upper()
         st['dist']['estado'] = 'InProgress'
         st['dist']['pendientes'] = int(os.environ.get('FAKE_DIST_LENTO', '0'))
@@ -393,10 +426,15 @@ def main():
         args = args[1:]
     o, pos = opciones(args)
     ruta = os.environ['FAKE_ESTADO']
-    if os.environ.get('FAKE_LOG'):
-        with open(os.environ['FAKE_LOG'], 'a', encoding='utf-8') as f:
-            f.write(f'{svc} {op}\n')
     st = cargar(ruta)
+    if os.environ.get('FAKE_LOG'):
+        detalle = ''
+        if (svc, op) == ('cloudfront', 'get-distribution-config'):
+            detalle = f" etag={st['dist']['etag']}"
+        if (svc, op) == ('cloudfront', 'update-distribution'):
+            detalle = f" if-match={o.get('if-match', '')}"
+        with open(os.environ['FAKE_LOG'], 'a', encoding='utf-8') as f:
+            f.write(f'{svc} {op}{detalle}\n')
     try:
         resultado = despachar(svc, op, o, pos, st)
     except Fallo as exc:

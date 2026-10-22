@@ -470,6 +470,13 @@ Regla implementada en `assets/js/admin-comun.js`, función `llamar()`:
   - Comment: máximo 128 caracteres. Un comentario más largo fue rechazado por CloudFront en el tercer intento real
     (`InvalidArgument: The parameter Comment is too big.`). El comentario actual tiene 79 y `validar.py` exige 100 como
     máximo.
+  - CacheBehavior admin: forma completa y explícita. `SmoothStreaming: false`, `Compress: true`,
+    `TrustedSigners` y `TrustedKeyGroups` con `Enabled: false, Quantity: 0`, `LambdaFunctionAssociations` y
+    `FunctionAssociations` con `Quantity: 0`, `FieldLevelEncryptionId: ''`. Sin SmoothStreaming, CloudFront rechazó
+    `UpdateDistribution` (`The parameter SmoothStreaming flag is missing.`). Los campos se controlan en `validar.py`
+    y en el fake de UpdateDistribution, no se agregan uno por uno tras cada error de AWS.
+  - Al actualizar: se parte de la configuración leída de CloudFront y solo se agregan origin y behavior admin.
+    El default behavior, los origins y los behaviors existentes no se reconstruyen ni se modifican.
   - Validar solo el shape con botocore NO alcanza: no detecta límites semánticos de CloudFront (longitud de Comment,
     combinaciones de cabeceras). Esos límites se controlan explícitamente en `validar.py` y en los tests.
   - `Host` no se reenvía: la Function URL necesita su propio host.

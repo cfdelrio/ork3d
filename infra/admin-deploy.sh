@@ -334,7 +334,11 @@ case "$ORP_RC" in
   4) ORP_EXISTE=no; ORP_ID="" ;;
   *) distinto "la origin request policy $ORP_NOMBRE existe con otra configuración" ;;
 esac
-echo "  origin request policy $ORP_NOMBRE: $( [[ $ORP_EXISTE == si ]] && echo "existe ($ORP_ID)" || echo 'no existe' )"
+if [[ $ORP_EXISTE == si ]]; then
+  echo "  origin request policy $ORP_NOMBRE: existe y coincide (ID $ORP_ID); no se vuelve a crear"
+else
+  echo "  origin request policy $ORP_NOMBRE: no existe"
+fi
 
 python3 "$AYUDA" dist-analizar "$T/dist-config.json" > "$T/dist-analisis.txt"
 DIST_RC=$?
@@ -354,6 +358,7 @@ paso "8. Plan (lo que se escribe)"
 [[ $PERM == ninguno ]] && echo "  agregar 2 permisos de CloudFront (InvokeFunctionUrl e InvokeFunction)"
 [[ $OAC_EXISTE == no ]] && echo "  crear OAC $OAC_NOMBRE (sigv4, always, lambda)"
 [[ $ORP_EXISTE == no ]] && echo "  crear origin request policy $ORP_NOMBRE"
+[[ $ORP_EXISTE == si ]] && echo "  origin request policy $ORP_NOMBRE: existe y coincide (no se crea)"
 if [[ $ORIGEN_ADMIN_EXISTE == no || $BEH_EXISTE == no ]]; then
   echo "  update-distribution $DIST: origen $ORIGEN y behavior $PATRON (If-Match ${ETAG:0:8}…)"
 else
@@ -475,10 +480,12 @@ if [[ $ORIGEN_ADMIN_EXISTE == no || $BEH_EXISTE == no ]]; then
     5) echo "ERROR: conflicto de patrones en CloudFront; no se escribe nada." >&2; exit 5 ;;
     *) distinto "la configuración existente de CloudFront no coincide con lo esperado" ;;
   esac
-  "$AWS" cloudfront update-distribution --id "$DIST" --if-match "$ETAG" \
+  ETAG_UPDATE="$(valor "$T/dist-ahora.json" ETag)"   # ETag leído justo antes del update
+  [[ -n "$ETAG_UPDATE" ]] || fallo "no se pudo leer el ETag inmediatamente antes del update"
+  "$AWS" cloudfront update-distribution --id "$DIST" --if-match "$ETAG_UPDATE" \
     --distribution-config "file://$T/dist-nueva.json" --output json > "$T/du.json" 2> "$T/du.err" \
     || fallo "update-distribution ($(detalle "$T/du.err"))"
-  echo "  update-distribution enviado (If-Match ${ETAG:0:8}…)"
+  echo "  update-distribution enviado (If-Match ${ETAG_UPDATE:0:8}…)"
   for _ in $(seq 1 60); do
     "$AWS" cloudfront get-distribution --id "$DIST" --output json > "$T/dist-poll.json" 2> /dev/null \
       || fallo "no se pudo consultar el estado de $DIST"

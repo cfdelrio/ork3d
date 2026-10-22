@@ -343,6 +343,20 @@ def validar_admin_deploy():
     comentario = json.loads(leer('infra/resenas/admin-origin-request-policy.json')).get('Comment', '')
     comprobar('Admin ORP: el Comment existe y cabe en 128 caracteres (límite de CloudFront), con margen de 100',
               0 < len(comentario) <= 100, f'{len(comentario)} caracteres')
+    # Forma del CacheBehavior admin: CloudFront rechazó un behavior sin SmoothStreaming. El shape de botocore no lo
+    # exige, así que se controla aquí: campos explícitos, booleanos y bloques vacíos.
+    spec_ayuda = importlib.util.spec_from_file_location('admin_deploy_ayuda', os.path.join(ROOT, 'infra/admin_deploy_ayuda.py'))
+    modulo_ayuda = importlib.util.module_from_spec(spec_ayuda)
+    spec_ayuda.loader.exec_module(modulo_ayuda)
+    behavior = modulo_ayuda.behavior_admin('ORP-PRUEBA')
+    comprobar('Admin deploy: el CacheBehavior admin incluye SmoothStreaming=false y bloques vacíos explícitos',
+              behavior.get('SmoothStreaming') is False
+              and behavior.get('TrustedSigners') == {'Enabled': False, 'Quantity': 0}
+              and behavior.get('TrustedKeyGroups') == {'Enabled': False, 'Quantity': 0}
+              and behavior.get('LambdaFunctionAssociations') == {'Quantity': 0}
+              and behavior.get('FunctionAssociations') == {'Quantity': 0}
+              and behavior.get('FieldLevelEncryptionId') == '' and behavior.get('Compress') is True,
+              str(sorted(behavior)))
     r = correr([sys.executable, '-m', 'py_compile', os.path.join(ROOT, 'infra/admin_deploy_ayuda.py')])
     comprobar('Admin deploy: compila infra/admin_deploy_ayuda.py', r.returncode == 0, r.stderr.strip())
     # Entorno vacío: sin ALLOW_ADMIN_DEPLOY=1 el script debe abortar con 3 antes de tocar AWS.
