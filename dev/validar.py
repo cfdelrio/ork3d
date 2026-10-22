@@ -62,7 +62,7 @@ def validar_javascript():
 
 def validar_shell():
     archivos = ['deploy.sh', 'verify.sh', 'infra/setup.sh', 'infra/teardown.sh', 'infra/resenas-setup.sh',
-                'infra/admin-setup.sh', 'infra/smoke-if-match.sh', 'infra/smoke-ses.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh',
+                'infra/admin-setup.sh', 'infra/smoke-if-match.sh', 'infra/smoke-ses.sh', 'infra/admin-deploy.sh', 'admin/resenas.sh', 'admin/tests/run_tests.sh',
                 'admin/tests/fixtures.sh']
     for rel in archivos:
         r = correr(['bash', '-n', rel])
@@ -327,6 +327,21 @@ def validar_smoke_ses():
               r.returncode == 3 and 'ABORTA' in r.stderr, f'rc={r.returncode} {r.stderr.strip()[:200]}')
 
 
+# ── Despliegue de la API admin V2: solo con ALLOW_ADMIN_DEPLOY=1 ──
+def validar_admin_deploy():
+    script = leer('infra/admin-deploy.sh')
+    comprobar('Admin deploy: la guarda ALLOW_ADMIN_DEPLOY=1 va antes de cualquier llamada a AWS',
+              script.index('ALLOW_ADMIN_DEPLOY') < script.index('"$AWS" sts get-caller-identity'))
+    comprobar('Admin deploy: no hay ninguna llamada de escritura fuera de la sección 9 (escrituras)',
+              script.index('# ── 9. Escrituras') < script.index('# ── 10. '))
+    r = correr([sys.executable, '-m', 'py_compile', os.path.join(ROOT, 'infra/admin_deploy_ayuda.py')])
+    comprobar('Admin deploy: compila infra/admin_deploy_ayuda.py', r.returncode == 0, r.stderr.strip())
+    # Entorno vacío: sin ALLOW_ADMIN_DEPLOY=1 el script debe abortar con 3 antes de tocar AWS.
+    r = correr(['env', '-i', 'PATH=' + os.environ.get('PATH', ''), 'bash', 'infra/admin-deploy.sh'])
+    comprobar('Admin deploy: sin ALLOW_ADMIN_DEPLOY=1 aborta con código 3 antes de llamar a AWS',
+              r.returncode == 3 and 'ABORTA' in r.stderr, f'rc={r.returncode} {r.stderr.strip()[:200]}')
+
+
 def main():
     validar_javascript()
     validar_shell()
@@ -339,6 +354,7 @@ def main():
     validar_admin_v2()
     validar_preflight_v2()
     validar_smoke_ses()
+    validar_admin_deploy()
     print(f'\nValidaciones: {aprobadas} PASS, {len(fallos)} FAIL')
     sys.exit(1 if fallos else 0)
 

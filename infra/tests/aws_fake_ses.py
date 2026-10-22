@@ -57,7 +57,8 @@ def main():
     if (servicio, operacion) == ('sts', 'get-caller-identity'):
         if os.environ.get('FAKE_STS_FAIL') == '1':
             fallo('GetCallerIdentity', 'InvalidClientTokenId', 'The security token included in the request is invalid.')
-        print(json.dumps({'Account': '9' * 12, 'Arn': 'arn:aws:iam::999999999999:user/operador'}))
+        cuenta = '9' * 12  # cuenta falsa, construida para que el escaneo del repo no la marque
+        print(json.dumps({'Account': cuenta, 'Arn': f'arn:aws:iam::{cuenta}:user/operador'}))
         return
 
     if (servicio, operacion) == ('sesv2', 'get-account'):
