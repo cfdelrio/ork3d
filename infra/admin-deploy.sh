@@ -9,7 +9,8 @@
 # Recursos existentes: si coinciden exactamente se tratan como idempotentes; si difieren, no se escribe nada.
 #
 # Escribe en AWS SOLO con ALLOW_ADMIN_DEPLOY=1. Sin esa variable sale con 3 antes de llamar a AWS.
-# Variables obligatorias (del entorno, nunca del repo): RESENAS_FROM_EMAIL y RESENAS_ADMIN_EMAIL.
+# Variables obligatorias (del entorno, nunca del repo): RESENAS_FROM_EMAIL y RESENAS_ADMIN_EMAIL. Solo en una
+# actualización de código (ALLOW_ADMIN_CODE_UPDATE=1) pueden faltar: se toman de la Lambda existente, sin imprimirlas.
 # AWS_PROFILE (default) y AWS_REGION (us-east-1): solo esos valores. RESENAS_BUCKET se lee de la Lambda pública.
 # ADMIN_DEPLOY_ESPERA: segundos entre reintentos y sondeos (30 por defecto).
 # ADMIN_DEPLOY_RUTA: carpeta de rollback (/tmp/ork3d-v2-deploy por defecto; solo para pruebas).
@@ -31,12 +32,6 @@ REGION="${AWS_REGION:-us-east-1}"
 [[ "$REGION" == "us-east-1" ]] || { echo "ERROR: AWS_REGION solo puede ser us-east-1 en este despliegue." >&2; exit 2; }
 export AWS_PROFILE="$PERFIL" AWS_REGION="$REGION" AWS_PAGER=""
 
-PATRON_CORREO='^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
-for variable in RESENAS_FROM_EMAIL RESENAS_ADMIN_EMAIL; do
-  valor="${!variable:-}"
-  [[ -n "$valor" ]] || { echo "ERROR: falta $variable (debe venir del entorno)." >&2; exit 2; }
-  [[ "$valor" =~ $PATRON_CORREO ]] || { echo "ERROR: $variable no tiene formato de correo." >&2; exit 2; }
-done
 [[ -z "${RESENAS_BUCKET:-}" ]] || { echo "ERROR: no definas RESENAS_BUCKET: se lee de la Lambda pública." >&2; exit 2; }
 
 AWS="${AWS_CLI:-aws}"
@@ -77,6 +72,23 @@ codigo()   { python3 -c 'import re, sys; m = re.search(r"An error occurred \((\w
 valor()    { python3 "$AYUDA" get "$1" "$2"; }
 enmascarar() { python3 "$AYUDA" mascarar "$1"; }
 paso()     { echo; echo "── $* ──"; }
+
+# Correos: del entorno. Solo en una actualización de código (ALLOW_ADMIN_CODE_UPDATE=1) pueden faltar: se leen de la
+# Lambda admin existente, que ya los tiene. Es una lectura; se exportan para el resto del script y nunca se imprimen.
+# Sin Lambda (creación desde cero) no hay de dónde leerlos y siguen siendo obligatorios del entorno.
+PATRON_CORREO='^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+if [[ "${ALLOW_ADMIN_CODE_UPDATE:-}" == "1" && ( -z "${RESENAS_FROM_EMAIL:-}" || -z "${RESENAS_ADMIN_EMAIL:-}" ) ]]; then
+  if "$AWS" lambda get-function-configuration --function-name "$FN_ADMIN" --output json > "$T/correos.json" 2> /dev/null; then
+    RESENAS_FROM_EMAIL="${RESENAS_FROM_EMAIL:-$(valor "$T/correos.json" Environment.Variables.RESENAS_FROM_EMAIL)}"
+    RESENAS_ADMIN_EMAIL="${RESENAS_ADMIN_EMAIL:-$(valor "$T/correos.json" Environment.Variables.RESENAS_ADMIN_EMAIL)}"
+  fi
+fi
+for variable in RESENAS_FROM_EMAIL RESENAS_ADMIN_EMAIL; do
+  dato="${!variable:-}"
+  [[ -n "$dato" ]] || { echo "ERROR: falta $variable (debe venir del entorno)." >&2; exit 2; }
+  [[ "$dato" =~ $PATRON_CORREO ]] || { echo "ERROR: $variable no tiene formato de correo." >&2; exit 2; }
+done
+export RESENAS_FROM_EMAIL RESENAS_ADMIN_EMAIL
 
 guardar_rollback() {  # NOMBRE ARCHIVO: copia nueva con la marca de la ejecución; nunca sobrescribe
   local nombre="$1" origen="$2"

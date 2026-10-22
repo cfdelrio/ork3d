@@ -25,6 +25,17 @@ ITEM = {'id': '0' * 32, 'rating': 5, 'comment': 'Muy buena', 'aspects': ['calida
         'photo_url': None, 'published_at': '2026-10-22T14:01:24Z'}
 
 
+REQUEST = '6f1c8e2a-0b7d-4a4e-9a55-1f0d6c2e9b11'
+LINEAS_NORMALES = [
+    f'START RequestId: {REQUEST} Version: $LATEST\n',
+    f'END RequestId: {REQUEST}\n',
+    f'REPORT RequestId: {REQUEST}\tDuration: 12.31 ms\tBilled Duration: 13 ms\tMemory Size: 256 MB\tMax Memory Used: 61 MB\n',
+    '{"ev": "moderacion", "review_id": "0123456789abcdef0123456789abcdef", "op": "aprobar", "estado": "publicada", '
+    '"resultado": "ok"}\n',
+]
+VALOR_FALSO = 'valor-de-prueba-' + 'a' * 24   # no es un token: el control nunca debe imprimirlo
+
+
 def cargar(nombre, ruta):
     spec = importlib.util.spec_from_file_location(nombre, ruta)
     modulo = importlib.util.module_from_spec(spec)
@@ -65,12 +76,6 @@ class HelpersLecturaTest(unittest.TestCase):
     def test_export_sin_lista_items_falla(self):
         self.assertTrue(ayuda.exportar(self.archivo('x.json', '{"otra": 1}')).startswith('FAIL'))
 
-    def test_logs_con_eventos_de_cookie_fallan_y_sin_eventos_pasan(self):
-        sin = self.archivo('logs0.json', json.dumps({'events': []}))
-        con = self.archivo('logs1.json', json.dumps({'events': [{'message': 'x'}]}))
-        self.assertTrue(ayuda.logs_limpios(sin).startswith('PASS'))
-        self.assertTrue(ayuda.logs_limpios(con).startswith('FAIL'))
-
     def test_fotos_lista_solo_las_que_tienen_url(self):
         urls = ayuda.fotos(self.export([ITEM, {**ITEM, 'photo_url': '/resenas/fotos/a.jpg'}]))
         self.assertEqual(urls, ['/resenas/fotos/a.jpg'])
@@ -107,10 +112,94 @@ class HelpersLecturaTest(unittest.TestCase):
         self.assertNotIn('no-imprimir', ayuda.flag_notificaciones(ruta))
 
 
+class LogsLimpiosTest(unittest.TestCase):
+    """Checker de cookies en los logs: busca en el texto de cada evento; no cuenta los eventos devueltos."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='prod-logs-')
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def logs(self, mensajes):
+        ruta = os.path.join(self.tmp, 'logs.json')
+        eventos = [{'timestamp': 1, 'message': m, 'eventId': str(i)} for i, m in enumerate(mensajes)]
+        with open(ruta, 'w', encoding='utf-8') as f:
+            json.dump({'events': eventos, 'searchedLogStreams': []}, f)
+        return ruta
+
+    def test_eventos_normales_pasan(self):
+        self.assertEqual(ayuda.logs_limpios(self.logs(LINEAS_NORMALES)), 'PASS: 4 evento(s) revisados')
+
+    def test_sin_eventos_pasa(self):
+        self.assertEqual(ayuda.logs_limpios(self.logs([])), 'PASS: 0 evento(s) revisados')
+
+    def test_fuga_real_falla_y_no_imprime_el_valor(self):
+        fugas = [
+            f'Cookie: ork3d_admin={VALOR_FALSO}',
+            f'cookie: ork3d_admin={VALOR_FALSO}',
+            f'Set-Cookie: ork3d_admin={VALOR_FALSO}; Path=/admin; HttpOnly; Secure; SameSite=Lax; Max-Age=28800',
+            f'set-cookie: ORK3D_ADMIN={VALOR_FALSO}',
+            f'{{"headers": {{"Set-Cookie": "ork3d_admin={VALOR_FALSO}"}}}}',
+            'Cookie: otra=1',
+            'x=1; Path=/admin; HttpOnly',
+        ]
+        for i, fuga in enumerate(fugas):
+            with self.subTest(caso=i):
+                resultado = ayuda.logs_limpios(self.logs([LINEAS_NORMALES[0], fuga]))
+                self.assertTrue(resultado.startswith('FAIL: 1 de 2'), resultado)
+                self.assertNotIn(VALOR_FALSO, resultado)
+
+    def test_resumen_nombra_las_categorias_sin_el_valor(self):
+        resultado = ayuda.logs_limpios(self.logs([f'Set-Cookie: ork3d_admin={VALOR_FALSO}; HttpOnly']))
+        self.assertIn('nombre de la cookie de sesión (1)', resultado)
+        self.assertIn('cabecera Set-Cookie (1)', resultado)
+        self.assertIn('atributo HttpOnly de una cookie (1)', resultado)
+        self.assertNotIn(VALOR_FALSO, resultado)
+
+    def test_texto_documental_no_cuenta(self):
+        documental = [
+            'La cookie de sesión dura 8 horas.',
+            'Set-Cookie se documenta en V2-ADMIN.md; HttpOnly también.',
+            '{"ev": "sesion_cerrada", "cookies": 0, "resultado": "ok"}',
+            'El atributo httponly no se loguea.',
+            'HttpOnly',
+            '    cookie = leer_cookie(evento)   # línea de código en un traceback',
+        ]
+        self.assertEqual(ayuda.logs_limpios(self.logs(documental)), 'PASS: 6 evento(s) revisados')
+
+    def test_regresion_120_eventos_normales_sin_cookies_pasa(self):
+        """El checker anterior daba FAIL con cualquier evento devuelto. Con 120 eventos normales debe dar PASS."""
+        mensajes = []
+        for i in range(40):
+            rid = f'{i:08x}-0b7d-4a4e-9a55-1f0d6c2e9b11'
+            mensajes += [f'START RequestId: {rid} Version: $LATEST\n', f'END RequestId: {rid}\n',
+                         f'REPORT RequestId: {rid}\tDuration: 3.10 ms\tMax Memory Used: 61 MB\n']
+        self.assertEqual(ayuda.logs_limpios(self.logs(mensajes)), 'PASS: 120 evento(s) revisados')
+
+    def test_una_fuga_entre_120_eventos_se_cuenta_sobre_el_total(self):
+        mensajes = [LINEAS_NORMALES[0]] * 120 + [f'Cookie: ork3d_admin={VALOR_FALSO}']
+        self.assertTrue(ayuda.logs_limpios(self.logs(mensajes)).startswith('FAIL: 1 de 121'))
+
+    def test_evento_sin_texto_o_salida_que_no_es_json_fallan(self):
+        sin_texto = os.path.join(self.tmp, 'sin-texto.json')
+        with open(sin_texto, 'w', encoding='utf-8') as f:
+            json.dump({'events': [{'eventId': '1'}]}, f)
+        self.assertTrue(ayuda.logs_limpios(sin_texto).startswith('FAIL'))
+        no_json = os.path.join(self.tmp, 'no-json.json')
+        with open(no_json, 'w', encoding='utf-8') as f:
+            f.write('<html>')
+        self.assertTrue(ayuda.logs_limpios(no_json).startswith('FAIL'))
+
+
 class ScriptSoloLecturaTest(unittest.TestCase):
     def setUp(self):
         with open(SCRIPT, encoding='utf-8') as f:
             self.texto = f.read()
+
+    def test_los_logs_se_leen_completos_sin_filtro_ni_limite(self):
+        codigo = '\n'.join(l for l in self.texto.splitlines() if not l.lstrip().startswith('#'))   # sin comentarios
+        self.assertIn('filter-log-events', codigo)
+        for opcion in ('--filter-pattern', '--max-items', '--starting-token', '--page-size'):
+            self.assertNotIn(opcion, codigo)
 
     def test_solo_peticiones_get(self):
         self.assertNotRegex(self.texto, r'-X\s+(POST|PUT|PATCH|DELETE)')
@@ -154,12 +243,13 @@ class PruebaEndToEndTest(unittest.TestCase):
         with open(os.path.join(carpeta, 'publicas.json'), 'w', encoding='utf-8') as f:
             json.dump({'items': items}, f)
 
-    def correr(self, estado=None):
+    def correr(self, estado=None, extra=None):
         if estado is not None:
             with open(self.estado, 'w', encoding='utf-8') as f:
                 json.dump(estado, f)
         env = {'PATH': os.environ.get('PATH', ''), 'CURL_CMD': FAKE_CURL, 'AWS_CLI': FAKE_AWS,
                'FAKE_SITIO_DIR': self.sitio, 'FAKE_ESTADO': self.estado, 'FAKE_CURL_REQ': self.peticiones}
+        env.update(extra or {})
         return subprocess.run(['bash', SCRIPT], env=env, cwd=RAIZ, capture_output=True, text=True, timeout=120)
 
     def lineas(self, r):
@@ -189,6 +279,15 @@ class PruebaEndToEndTest(unittest.TestCase):
     def test_export_con_dato_privado_falla_el_control(self):
         self.publicar([{**ITEM, 'private_feedback': 'interno'}])
         self.assertIn('FAIL  export público: solo la allowlist', self.correr().stdout)
+
+    def test_fuga_en_los_logs_falla_el_control_sin_mostrar_el_valor(self):
+        fuga = os.path.join(self.tmp, 'fuga.json')
+        with open(fuga, 'w', encoding='utf-8') as f:
+            json.dump([LINEAS_NORMALES[0], f'Set-Cookie: ork3d_admin={VALOR_FALSO}; HttpOnly'], f)
+        r = self.correr(extra={'FAKE_LOGS_EVENTOS': fuga})
+        self.assertIn('FAIL  logs de /aws/lambda/ork3d-resenas-admin sin cookies ni Set-Cookie (24 h)', r.stdout)
+        self.assertIn('FAIL  logs de /aws/lambda/ork3d-resenas sin cookies ni Set-Cookie (24 h)', r.stdout)
+        self.assertNotIn(VALOR_FALSO, r.stdout + r.stderr)
 
     def test_notificaciones_encendidas_fallan_el_control(self):
         st = fake.estado_inicial()

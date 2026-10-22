@@ -834,7 +834,12 @@ esperado y cuerpo JSON. Están en `test_app.py`, `test_nucleo.py`, `test_contrat
 `/`, `/opiniones` (accesible, `noindex, follow`, no enlazada desde home, fuera del sitemap), `/opinar/<token
 inexistente>`, `www` → apex, `/admin/resenas` y `/admin/entrar`, la API sin cookie (401), el export (allowlist) y
 cada foto publicada (200 `image/jpeg`), el flag de notificaciones y los logs de CloudWatch de las dos Lambdas en las
-últimas 24 h, sin cookies ni `Set-Cookie`. No escribe nada. Probado con el simulador y el sitio real del repo
+últimas 24 h, sin cookies ni `Set-Cookie`. Los logs se leen completos (`filter-log-events` sin filtro) y la búsqueda
+la hace `prod_lectura_ayuda.py logs-limpios` en local, sin distinguir mayúsculas: `ork3d_admin`, las cabeceras `Cookie:`
+y `Set-Cookie:` (con dos puntos) y `HttpOnly` como atributo de un `nombre=valor`. La prosa ("cookie" en una frase) y
+las líneas de código ("cookie = …") no cuentan. El control informa eventos con señal sobre el total, nunca el texto ni el valor.
+El filtro de CloudWatch del control anterior (`?ork3d_admin ?Set-Cookie ?HttpOnly`) devolvía eventos sin cookie en su
+texto (139 y 117 eventos, 0 coincidencias en el contenido): ese control daba falsos positivos. No escribe nada. Probado con el simulador y el sitio real del repo
 (`infra/tests/test_prod_lectura.py`). El `www` → apex falla en el simulador porque no modela la redirección de
 CloudFront: en producción debe dar PASS.
 

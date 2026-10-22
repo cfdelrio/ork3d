@@ -808,6 +808,65 @@ class CodigoLambdaTest(DespliegueTest):
         self.assertEqual(len(self.copias_de_codigo()), 1)
 
 
+class CorreosDeLaLambdaTest(DespliegueTest):
+    """Correos fuera del entorno: solo en una actualización de código, leídos de la Lambda existente y sin imprimirlos."""
+
+    def setUp(self):
+        super().setUp()
+        self.anterior = os.path.join(self.tmp, 'codigo-anterior.zip')
+        with open(self.anterior, 'wb') as f:
+            f.write(b'codigo anterior de prueba')
+        self.sha_anterior = base64.b64encode(hashlib.sha256(b'codigo anterior de prueba').digest()).decode('ascii')
+
+    def crear_lambda(self):
+        self.assertEqual(self.correr().returncode, 0)   # crea la Lambda con los correos del entorno
+        if os.path.exists(self.log):
+            os.remove(self.log)   # las llamadas que se miden empiezan aquí
+
+    def crear_con_codigo_distinto(self):
+        self.crear_lambda()
+        def cambiar(st):
+            st['lambda']['config']['CodeSha256'] = self.sha_anterior
+        self.modificar_estado(cambiar)
+
+    def test_actualizacion_de_codigo_toma_los_correos_de_la_lambda_sin_imprimirlos(self):
+        self.crear_con_codigo_distinto()
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1', 'FAKE_CODIGO_ANTERIOR_ARCHIVO': self.anterior}, sin_correos=True)
+        visible = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, visible)
+        self.assertEqual(self.mutantes(), ['lambda update-function-code'])
+        self.assertNotIn(FROM, visible)
+        self.assertNotIn(ADMIN, visible)
+        self.assertIn('código de ork3d-resenas-admin actualizado', visible)
+        variables = self.estado_actual()['lambda']['config']['Environment']['Variables']
+        self.assertEqual(variables['RESENAS_FROM_EMAIL'], FROM)
+        self.assertEqual(variables['RESENAS_ADMIN_EMAIL'], ADMIN)
+
+    def test_sin_lambda_los_correos_siguen_siendo_obligatorios(self):
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1'}, sin_correos=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('falta RESENAS_FROM_EMAIL', r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
+
+    def test_con_lambda_pero_sin_flag_los_correos_siguen_siendo_del_entorno(self):
+        self.crear_lambda()
+        r = self.correr(sin_correos=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('falta RESENAS_FROM_EMAIL', r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
+
+    def test_correo_de_la_lambda_con_formato_invalido_aborta_sin_mostrarlo(self):
+        self.crear_lambda()
+        def cambiar(st):
+            st['lambda']['config']['Environment']['Variables']['RESENAS_ADMIN_EMAIL'] = 'valor-sin-arroba'
+        self.modificar_estado(cambiar)
+        r = self.correr({'ALLOW_ADMIN_CODE_UPDATE': '1'}, sin_correos=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('RESENAS_ADMIN_EMAIL no tiene formato de correo', r.stdout + r.stderr)
+        self.assertNotIn('valor-sin-arroba', r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
+
+
 class BehaviorAdminTest(unittest.TestCase):
     """Forma del CacheBehavior de /admin/api/*. Sin AWS."""
 

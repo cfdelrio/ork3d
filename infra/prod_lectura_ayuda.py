@@ -7,7 +7,8 @@
   sin-enlace ARCHIVO RUTA          PASS/FAIL: la página no enlaza RUTA (p. ej. /opiniones)
   sitemap-sin ARCHIVO RUTA         PASS/FAIL: el sitemap no lista RUTA
   flag-notificaciones ARCHIVO      PASS/FAIL: RESENAS_NOTIFY_ENABLED de la configuración de la Lambda está apagado
-  logs-limpios ARCHIVO             PASS/FAIL: la salida de filter-log-events no trae eventos (cookies o Set-Cookie)
+  logs-limpios ARCHIVO             PASS/FAIL: ningún evento de la salida de filter-log-events (sin filtro, 24 h) trae
+                                   cookie ni Set-Cookie en su texto. Solo imprime conteos y nombres de categoría.
 """
 import json
 import re
@@ -87,15 +88,45 @@ def flag_notificaciones(ruta):
     return f'FAIL: RESENAS_NOTIFY_ENABLED={valor}; las notificaciones están encendidas'
 
 
+# Señales de cookie en el texto de un evento, sin distinguir mayúsculas. La prosa ("la cookie dura 8 h", "HttpOnly
+# en la documentación") y el código ("cookie = leer(evento)" en un traceback) no cuentan: las cabeceras se reconocen
+# por los dos puntos, y el atributo HttpOnly por ir detrás de un par nombre=valor.
+PATRONES_COOKIE = (
+    ('nombre de la cookie de sesión', re.compile(r'ork3d_admin', re.IGNORECASE)),
+    ('cabecera Set-Cookie', re.compile(r'(?<![\w-])set-cookie["\']?\s*:', re.IGNORECASE)),
+    ('cabecera Cookie', re.compile(r'(?<![\w-])cookie["\']?\s*:', re.IGNORECASE)),
+    ('atributo HttpOnly de una cookie', re.compile(r'[\w.-]+=[^;\n]*;[^\n]*?\bhttponly\b', re.IGNORECASE)),
+)
+
+
 def logs_limpios(ruta):
-    """Cuenta los eventos que devolvió filter-log-events. Cero eventos significa que nada coincidió con el patrón."""
+    """Busca PATRONES_COOKIE en el texto de TODOS los eventos de la salida de filter-log-events (sin filtro).
+
+    Cuenta eventos con señal, no eventos devueltos. Nunca imprime el texto. Un evento sin texto legible falla:
+    no se puede afirmar que esté limpio.
+    """
     try:
-        eventos = json.loads(_leer(ruta)).get('events', [])
+        datos = json.loads(_leer(ruta))
     except ValueError:
         return 'FAIL: la salida de los logs no es JSON'
-    if eventos:
-        return f'FAIL: {len(eventos)} evento(s) con cookie o Set-Cookie en las últimas 24 h'
-    return 'PASS: sin cookies ni Set-Cookie en las últimas 24 h'
+    eventos = datos.get('events', []) if isinstance(datos, dict) else None
+    if not isinstance(eventos, list):
+        return 'FAIL: la salida de los logs no tiene la lista events'
+    sin_texto = sum(1 for e in eventos if not isinstance(e, dict) or not isinstance(e.get('message'), str))
+    if sin_texto:
+        return f'FAIL: {sin_texto} evento(s) sin texto legible: no se pueden revisar'
+    categorias = {}
+    con_senal = 0
+    for evento in eventos:
+        halladas = [nombre for nombre, patron in PATRONES_COOKIE if patron.search(evento['message'])]
+        if halladas:
+            con_senal += 1
+            for nombre in halladas:
+                categorias[nombre] = categorias.get(nombre, 0) + 1
+    if con_senal:
+        resumen = ', '.join(f'{nombre} ({n})' for nombre, n in sorted(categorias.items()))
+        return f'FAIL: {con_senal} de {len(eventos)} evento(s) con cookie o Set-Cookie: {resumen}'
+    return f'PASS: {len(eventos)} evento(s) revisados'
 
 
 def main(argv):

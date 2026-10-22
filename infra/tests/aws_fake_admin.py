@@ -356,12 +356,18 @@ def despachar(svc, op, o, pos, st):
 
     if (svc, op) == ('logs', 'filter-log-events'):
         # Una línea REPORT por invocación: la escribe el simulador de curl (FAKE_INVOCACIONES) cuando la API responde.
+        # FAKE_LOGS_EVENTOS: lista JSON de mensajes extra (p. ej. una fuga). Se devuelven todos, sin filtrar.
         ruta_marcas = os.environ.get('FAKE_INVOCACIONES', '')
         marcas = []
         if ruta_marcas and os.path.exists(ruta_marcas):
             with open(ruta_marcas, encoding='utf-8') as f:
                 marcas = [int(linea) for linea in f if linea.strip()]
-        return {'events': [{'timestamp': m, 'message': 'REPORT RequestId: fake', 'eventId': str(m)} for m in marcas]}
+        eventos = [{'timestamp': m, 'message': 'REPORT RequestId: fake', 'eventId': str(m)} for m in marcas]
+        ruta_extra = os.environ.get('FAKE_LOGS_EVENTOS', '')
+        if ruta_extra and os.path.exists(ruta_extra):
+            with open(ruta_extra, encoding='utf-8') as f:
+                eventos += [{'timestamp': 1, 'message': m, 'eventId': f'extra{i}'} for i, m in enumerate(json.load(f))]
+        return {'events': eventos}
 
     if (svc, op) == ('logs', 'create-log-group'):
         nombre = o.get('log-group-name')

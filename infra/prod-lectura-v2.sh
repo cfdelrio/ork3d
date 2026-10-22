@@ -110,10 +110,12 @@ else
 fi
 
 # ── Logs (lectura de CloudWatch, últimas 24 h): sin cookies ni Set-Cookie ─────
+# Sin --filter-pattern: el filtro de CloudWatch devolvió eventos sin cookie en su texto. Se leen todos los eventos
+# (la CLI pagina sola; no hay --max-items) y la búsqueda la hace prod_lectura_ayuda.py en local.
 INICIO_MS="$(python3 -c 'import time; print(int((time.time() - 86400) * 1000))')"
 for grupo in /aws/lambda/ork3d-resenas-admin /aws/lambda/ork3d-resenas; do
   if "$AWS" logs filter-log-events --log-group-name "$grupo" --start-time "$INICIO_MS" \
-       --filter-pattern '?ork3d_admin ?Set-Cookie ?HttpOnly' --output json > "$DIR/logs.json" 2> "$DIR/logs.err"; then
+       --output json > "$DIR/logs.json" 2> "$DIR/logs.err"; then
     control "logs de $grupo sin cookies ni Set-Cookie (24 h)" "$(python3 "$AYUDA" logs-limpios "$DIR/logs.json")"
   else
     control "logs de $grupo legibles" "FAIL: no se pudieron leer los logs (lectura, sin cambios)"
