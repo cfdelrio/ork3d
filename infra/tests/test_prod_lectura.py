@@ -65,6 +65,12 @@ class HelpersLecturaTest(unittest.TestCase):
     def test_export_sin_lista_items_falla(self):
         self.assertTrue(ayuda.exportar(self.archivo('x.json', '{"otra": 1}')).startswith('FAIL'))
 
+    def test_logs_con_eventos_de_cookie_fallan_y_sin_eventos_pasan(self):
+        sin = self.archivo('logs0.json', json.dumps({'events': []}))
+        con = self.archivo('logs1.json', json.dumps({'events': [{'message': 'x'}]}))
+        self.assertTrue(ayuda.logs_limpios(sin).startswith('PASS'))
+        self.assertTrue(ayuda.logs_limpios(con).startswith('FAIL'))
+
     def test_fotos_lista_solo_las_que_tienen_url(self):
         urls = ayuda.fotos(self.export([ITEM, {**ITEM, 'photo_url': '/resenas/fotos/a.jpg'}]))
         self.assertEqual(urls, ['/resenas/fotos/a.jpg'])
@@ -118,7 +124,7 @@ class ScriptSoloLecturaTest(unittest.TestCase):
 
     def test_la_unica_lectura_de_aws_es_la_configuracion_de_la_lambda_publica(self):
         self.assertEqual(re.findall(r'"\$AWS" ([a-z0-9-]+ [a-z0-9-]+)', self.texto),
-                         ['lambda get-function-configuration'])
+                         ['lambda get-function-configuration', 'logs filter-log-events'])
 
 
 class PruebaEndToEndTest(unittest.TestCase):
@@ -169,7 +175,8 @@ class PruebaEndToEndTest(unittest.TestCase):
                         'home no enlaza /opiniones', 'sitemap no lista /opiniones',
                         '/opinar/<token> responde la página pública', '/admin/resenas responde 200',
                         '/admin/entrar responde 200', 'API admin sin cookie responde 401',
-                        'export público: solo la allowlist', 'foto pública 1', 'RESENAS_NOTIFY_ENABLED apagado'):
+                        'export público: solo la allowlist', 'foto pública 1', 'RESENAS_NOTIFY_ENABLED apagado',
+                        'logs de /aws/lambda/ork3d-resenas-admin sin cookies', 'logs de /aws/lambda/ork3d-resenas sin'):
             self.assertIn(control, pasan)
         self.assertEqual(r.returncode, 1, 'un FAIL deja el código de salida en 1')
 

@@ -833,8 +833,10 @@ esperado y cuerpo JSON. Están en `test_app.py`, `test_nucleo.py`, `test_contrat
 **Verificación de lectura de producción** (`infra/prod-lectura-v2.sh`): solo GET y una lectura de AWS. Comprueba
 `/`, `/opiniones` (accesible, `noindex, follow`, no enlazada desde home, fuera del sitemap), `/opinar/<token
 inexistente>`, `www` → apex, `/admin/resenas` y `/admin/entrar`, la API sin cookie (401), el export (allowlist) y
-cada foto publicada (200 `image/jpeg`), y el flag de notificaciones. No escribe nada. Probado con el simulador y el
-sitio real del repo (`infra/tests/test_prod_lectura.py`).
+cada foto publicada (200 `image/jpeg`), el flag de notificaciones y los logs de CloudWatch de las dos Lambdas en las
+últimas 24 h, sin cookies ni `Set-Cookie`. No escribe nada. Probado con el simulador y el sitio real del repo
+(`infra/tests/test_prod_lectura.py`). El `www` → apex falla en el simulador porque no modela la redirección de
+CloudFront: en producción debe dar PASS.
 
 **Pendientes y riesgos abiertos**:
 

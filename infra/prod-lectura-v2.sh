@@ -21,12 +21,14 @@ trap 'rm -rf "$DIR"' EXIT
 FALLOS=0
 TOKEN_FALSO="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"   # forma de token, inexistente: no consume nada
 
-control() {  # NOMBRE RESULTADO: PASS/FAIL en una línea
-  local nombre="$1" resultado="$2"
+control() {  # NOMBRE RESULTADO: PASS/FAIL en una línea; el detalle es lo que sigue a "PASS:" o "FAIL:"
+  local nombre="$1" resultado="$2" detalle
+  detalle="${resultado#*: }"
+  [[ "$detalle" == "$resultado" ]] && detalle=""
   if [[ "$resultado" == PASS* ]]; then
-    echo "PASS  $nombre — ${resultado#PASS: }"
+    echo "PASS  $nombre${detalle:+ — $detalle}"
   else
-    echo "FAIL  $nombre — ${resultado#FAIL: }"
+    echo "FAIL  $nombre${detalle:+ — $detalle}"
     FALLOS=$((FALLOS + 1))
   fi
 }
@@ -106,6 +108,17 @@ if "$AWS" lambda get-function-configuration --function-name ork3d-resenas --outp
 else
   control "configuración de la Lambda pública legible" "FAIL: no se pudo leer la configuración (lectura, sin cambios)"
 fi
+
+# ── Logs (lectura de CloudWatch, últimas 24 h): sin cookies ni Set-Cookie ─────
+INICIO_MS="$(python3 -c 'import time; print(int((time.time() - 86400) * 1000))')"
+for grupo in /aws/lambda/ork3d-resenas-admin /aws/lambda/ork3d-resenas; do
+  if "$AWS" logs filter-log-events --log-group-name "$grupo" --start-time "$INICIO_MS" \
+       --filter-pattern '?ork3d_admin ?Set-Cookie ?HttpOnly' --output json > "$DIR/logs.json" 2> "$DIR/logs.err"; then
+    control "logs de $grupo sin cookies ni Set-Cookie (24 h)" "$(python3 "$AYUDA" logs-limpios "$DIR/logs.json")"
+  else
+    control "logs de $grupo legibles" "FAIL: no se pudieron leer los logs (lectura, sin cambios)"
+  fi
+done
 
 echo
 if [[ "$FALLOS" -eq 0 ]]; then

@@ -7,6 +7,7 @@
   sin-enlace ARCHIVO RUTA          PASS/FAIL: la página no enlaza RUTA (p. ej. /opiniones)
   sitemap-sin ARCHIVO RUTA         PASS/FAIL: el sitemap no lista RUTA
   flag-notificaciones ARCHIVO      PASS/FAIL: RESENAS_NOTIFY_ENABLED de la configuración de la Lambda está apagado
+  logs-limpios ARCHIVO             PASS/FAIL: la salida de filter-log-events no trae eventos (cookies o Set-Cookie)
 """
 import json
 import re
@@ -44,7 +45,7 @@ def exportar(ruta):
         return 'FAIL: el export contiene una dirección de correo'
     if PATRON_TOKEN_HASH.search(texto):
         return 'FAIL: el export contiene un hash de 64 caracteres (token_hash)'
-    return f'PASS: {len(items)} reseñas, solo la allowlist'
+    return f'PASS: {len(items)} reseña(s), solo la allowlist'
 
 
 def fotos(ruta):
@@ -86,6 +87,17 @@ def flag_notificaciones(ruta):
     return f'FAIL: RESENAS_NOTIFY_ENABLED={valor}; las notificaciones están encendidas'
 
 
+def logs_limpios(ruta):
+    """Cuenta los eventos que devolvió filter-log-events. Cero eventos significa que nada coincidió con el patrón."""
+    try:
+        eventos = json.loads(_leer(ruta)).get('events', [])
+    except ValueError:
+        return 'FAIL: la salida de los logs no es JSON'
+    if eventos:
+        return f'FAIL: {len(eventos)} evento(s) con cookie o Set-Cookie en las últimas 24 h'
+    return 'PASS: sin cookies ni Set-Cookie en las últimas 24 h'
+
+
 def main(argv):
     orden, args = argv[0], argv[1:]
     if orden == 'exportar':
@@ -104,6 +116,8 @@ def main(argv):
         resultado = sitemap_sin(*args)
     elif orden == 'flag-notificaciones':
         resultado = flag_notificaciones(*args)
+    elif orden == 'logs-limpios':
+        resultado = logs_limpios(*args)
     else:
         raise SystemExit(f'orden desconocida: {orden}')
     print(resultado)
