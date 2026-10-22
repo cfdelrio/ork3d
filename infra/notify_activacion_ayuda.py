@@ -1,22 +1,40 @@
 #!/usr/bin/env python3
-"""Ayuda de infra/notify-activacion.sh: aviso de reseña nueva (RESENAS_NOTIFY_ENABLED) en la Lambda pública.
+"""Ayuda del aviso de reseña nueva (RESENAS_NOTIFY_ENABLED) en la Lambda pública. Sin AWS ni red.
 
-Sin AWS ni red: solo lee archivos que el script ya descargó a una carpeta privada. Nunca imprime correos, tokens
-ni valores de variables: solo nombres de variable, nombres de sentencia, conteos y categorías de error.
+Solo lee archivos que los scripts ya descargaron a una carpeta privada. Nunca imprime correos completos, tokens ni
+valores de variables: solo nombres de variable, nombres de sentencia, conteos y forma redactada de los correos.
 
-  estado-flag CONFIG                      imprime apagado | activo | desconocido (sale 1 si es desconocido)
+Activación (infra/notify-activacion.sh):
+  estado-flag CONFIG                      apagado | activo | desconocido (sale 1 si es desconocido)
   politica LIVE PLANTILLA CONFIG CUENTA   PASS/FAIL: el rol tiene exactas las dos sentencias del aviso
-  codigo ZIP RAIZ                         PASS/FAIL/INFO: el código desplegado tiene el aviso y coincide con HEAD
+  codigo ZIP RAIZ                         PASS/FAIL/INFO: el código desplegado es el del aviso, módulo por módulo
   snapshot CONFIG SALIDA                  guarda el Environment actual para revertir (600)
   plan-activar CONFIG SALIDA              Environment completo con RESENAS_NOTIFY_ENABLED=true (600)
   plan-revertir SNAPSHOT SALIDA           Environment guardado, tal cual (600)
   comparar ANTES DESPUES MODO             PASS/FAIL: activar = solo cambió la flag; revertir = igual al guardado
   logs ARCHIVO                            conteos de eventos del aviso en los logs; sin texto de los mensajes
+
+Despliegue de la Lambda pública (infra/notify-public-code-deploy.sh, infra/notify-public-iam.sh):
+  zip-aviso RAIZ SALIDA                   paquete mínimo y determinista: app.py + el cierre de imports (imprime SHA)
+  comparar-paquetes DESPLEGADO PROPUESTO RAIZ    qué archivos cambian y por qué
+  env-nuevo CONFIG ADMIN SALIDA           variables actuales + las nuevas; nunca reemplaza el mapa
+  muestra-sentencias PLANTILLA            las sentencias del aviso con placeholders (para revisar el diff de IAM)
+  politica-fusion LIVE PLANTILLA BUCKET ORIGEN DESTINO CUENTA SALIDA
+                                          agrega solo las sentencias que faltan; nunca quita ni cambia las demás
+  instantanea CONFIG ZIP URL RECURSO CONCURRENCIA CLOUDFRONT EXPORT_SHA CARPETA   foto de lo que debe quedar igual
+  verificar-publico ANTES DESPUES CODESHA ADMIN   PASS/FAIL tras la Fase A (flag false, env preservado, resto igual)
+  comparar-restauracion ANTES DESPUES     PASS/FAIL tras revertir: configuración y código como antes
+  comparar-politica ANTES DESPUES         PASS/FAIL: toda sentencia anterior del rol sigue igual
+  config-iam CONFIG ADMIN SALIDA         configuración para verificar la política (bucket y correos del admin)
 """
+import ast
+import base64
 import glob
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import zipfile
 from collections import Counter
@@ -25,11 +43,16 @@ FLAG = 'RESENAS_NOTIFY_ENABLED'
 REGION = 'us-east-1'
 SID_SES = 'NotificarNuevaResenaAlModerador'
 SID_AVISOS = 'GuardarAvisosDeNotificacion'
-ARCHIVOS_AVISO = ('app.py', 'nucleo/correo.py')
-CAMPOS_CONFIG = ('Runtime', 'Handler', 'MemorySize', 'Timeout', 'CodeSha256', 'Role')
+# Cierre de imports de app.py en la Lambda pública (lo verifica test_notify_activacion: si cambian los imports, falla).
+MODULOS_AVISO = ('app.py', 'nucleo/__init__.py', 'nucleo/almacen.py', 'nucleo/correo.py', 'nucleo/errores.py',
+                 'nucleo/jpeg.py', 'nucleo/registro.py', 'nucleo/tokens.py')
+VARIABLES_PUBLICAS_NUEVAS = ('RESENAS_FROM_EMAIL', 'RESENAS_ADMIN_EMAIL', 'RESENAS_ADMIN_BASE_URL')
+CORREOS = ('RESENAS_FROM_EMAIL', 'RESENAS_ADMIN_EMAIL')
+CAMPOS_CONFIG = ('Runtime', 'Handler', 'MemorySize', 'Timeout', 'Role')
 EVENTOS_AVISO = ('resena_creada', 'aviso_enviado', 'aviso_fallido')
 PATRON_CATEGORIA = re.compile(r'[A-Za-z][A-Za-z0-9_.]{0,80}')
 PATRON_PLACEHOLDER = re.compile(r'__[A-Z_]+__')
+PATRON_CORREO = re.compile(r'[^@\s]+@[^@\s]+\.[^@\s]+')
 
 
 def _cargar(ruta):
@@ -67,6 +90,27 @@ def _normal(sentencia):
             'Condition': sentencia.get('Condition')}
 
 
+def redactar(correo):
+    """c***@g***.com: primera letra del usuario y del dominio, y el dominio de nivel superior."""
+    local, _, dominio = correo.partition('@')
+    if not dominio:
+        return '(sin formato)'
+    return local[:1] + '***@' + dominio[:1] + '***.' + dominio.rsplit('.', 1)[-1]
+
+
+def _renderizar(plantilla, valores):
+    """Sentencias de lambda-permisos.json con los valores dados. {} si queda algún placeholder sin valor."""
+    with open(plantilla, encoding='utf-8') as f:
+        texto = f.read()
+    for clave, valor in valores.items():
+        texto = texto.replace(f'__{clave}__', valor)
+    if PATRON_PLACEHOLDER.search(texto):
+        return {}
+    return {s['Sid']: s for s in json.loads(texto)['Statement'] if 'Sid' in s}
+
+
+# ── Activación ────────────────────────────────────────────────────────────────
+
 def estado_flag(config):
     valor = _variables(_cargar(config)).get(FLAG)
     if valor is None or str(valor).lower() == 'false':
@@ -77,7 +121,7 @@ def estado_flag(config):
 
 
 def sentencias_esperadas(config, plantilla, cuenta):
-    """Las sentencias de lambda-permisos.json renderizadas con la configuración real. None si faltan datos."""
+    """Las sentencias del aviso con la configuración real de la Lambda pública. None si faltan datos."""
     variables = _variables(_cargar(config))
     valores = {'RESENAS_BUCKET': variables.get('RESENAS_BUCKET'),
                'RESENAS_FROM_EMAIL': variables.get('RESENAS_FROM_EMAIL'),
@@ -85,13 +129,7 @@ def sentencias_esperadas(config, plantilla, cuenta):
                'AWS_REGION': REGION, 'ACCOUNT_ID': cuenta}
     if not all(valores.values()):
         return None
-    with open(plantilla, encoding='utf-8') as f:
-        texto = f.read()
-    for clave, valor in valores.items():
-        texto = texto.replace(f'__{clave}__', valor)
-    if PATRON_PLACEHOLDER.search(texto):
-        return {}
-    return {s['Sid']: s for s in json.loads(texto)['Statement'] if 'Sid' in s}
+    return _renderizar(plantilla, valores)
 
 
 def politica(live, plantilla, config, cuenta):
@@ -101,7 +139,7 @@ def politica(live, plantilla, config, cuenta):
     if SID_SES not in esperadas or SID_AVISOS not in esperadas:
         return ['FAIL: la plantilla lambda-permisos.json no trae las sentencias del aviso']
     documento = _cargar(live)
-    documento = documento.get('PolicyDocument', documento)   # salida de get-role-policy
+    documento = documento.get('PolicyDocument', documento)
     vivas = {s.get('Sid'): s for s in _lista(documento.get('Statement'))}
     faltan = [sid for sid in (SID_SES, SID_AVISOS)
               if sid not in vivas or _normal(vivas[sid]) != _normal(esperadas[sid])]
@@ -111,10 +149,8 @@ def politica(live, plantilla, config, cuenta):
 
 
 def codigo(zip_path, raiz):
+    """Compara el paquete desplegado con HEAD módulo por módulo. Los módulos del cierre deben ser idénticos."""
     lineas = []
-    repo = {'app.py': os.path.join(raiz, 'api', 'resenas', 'app.py')}
-    for ruta in sorted(glob.glob(os.path.join(raiz, 'api', 'resenas', 'nucleo', '*.py'))):
-        repo['nucleo/' + os.path.basename(ruta)] = ruta
     with zipfile.ZipFile(zip_path) as z:
         desplegado = {n: z.read(n) for n in z.namelist() if n.endswith('.py')}
     texto_app = desplegado.get('app.py', b'').decode('utf-8', 'replace')
@@ -124,24 +160,17 @@ def codigo(zip_path, raiz):
                    and 'aviso_fallido' in texto_correo)
     if not tiene_aviso:
         return ['FAIL: el código desplegado no trae el aviso: hace falta desplegar la Lambda pública antes de activar']
-    for nombre in ARCHIVOS_AVISO:
-        ruta = repo.get(nombre)
-        if nombre not in desplegado or ruta is None:
+    for nombre in MODULOS_AVISO:
+        ruta = os.path.join(raiz, 'api', 'resenas', *nombre.split('/'))
+        if nombre not in desplegado:
             lineas.append(f'FAIL: {nombre} no está en el paquete desplegado')
         elif _bytes(ruta) != desplegado[nombre]:
             lineas.append(f'FAIL: {nombre} difiere de HEAD: desplegar HEAD antes de activar')
     if any(l.startswith('FAIL') for l in lineas):
         return lineas
-    lineas.append('PASS: el código desplegado trae el aviso y app.py y nucleo/correo.py son idénticos a HEAD')
-    for nombre in sorted(repo):
-        if nombre in ARCHIVOS_AVISO:
-            continue
-        if nombre not in desplegado:
-            lineas.append(f'INFO: {nombre} no está en el paquete desplegado')
-        elif _bytes(repo[nombre]) != desplegado[nombre]:
-            lineas.append(f'INFO: {nombre} difiere de HEAD (no bloquea el aviso)')
-    for nombre in sorted(set(desplegado) - set(repo)):
-        lineas.append(f'INFO: {nombre} solo está en el paquete desplegado')
+    lineas.append('PASS: el código desplegado trae el aviso y cada módulo de su cierre es idéntico a HEAD')
+    for nombre in sorted(set(desplegado) - set(MODULOS_AVISO)):
+        lineas.append(f'INFO: {nombre} está en el paquete pero el aviso no lo importa')
     return lineas
 
 
@@ -168,7 +197,7 @@ def comparar(antes, despues, modo):
             lineas.append(f"FAIL: LastUpdateStatus={cfg_despues.get('LastUpdateStatus')}, se esperaba Successful")
         if vars_despues.get(FLAG) != 'true':
             lineas.append('FAIL: RESENAS_NOTIFY_ENABLED no quedó en true')
-        cambiados = [c for c in CAMPOS_CONFIG if cfg_antes.get(c) != cfg_despues.get(c)]
+        cambiados = [c for c in CAMPOS_CONFIG + ('CodeSha256',) if cfg_antes.get(c) != cfg_despues.get(c)]
         if cambiados:
             lineas.append(f"FAIL: cambió la configuración: {', '.join(cambiados)}")
         otras = sorted(k for k in set(vars_antes) | set(vars_despues)
@@ -182,8 +211,7 @@ def comparar(antes, despues, modo):
     if modo == 'revertir':
         if vars_antes == vars_despues:
             return ['PASS: las variables quedaron exactamente como antes de activar']
-        distintas = sorted(k for k in set(vars_antes) | set(vars_despues)
-                           if vars_antes.get(k) != vars_despues.get(k))
+        distintas = sorted(k for k in set(vars_antes) | set(vars_despues) if vars_antes.get(k) != vars_despues.get(k))
         return [f"FAIL: no coinciden con lo guardado: {', '.join(distintas)}"]
     raise SystemExit(f'modo desconocido: {modo}')
 
@@ -220,6 +248,269 @@ def logs(ruta):
     return lineas
 
 
+# ── Despliegue de la Lambda pública ───────────────────────────────────────────
+
+def cierre_de_imports(raiz):
+    """Módulos de nucleo/ que app.py importa, directa o indirectamente. Se calcula desde el código."""
+    def importados(ruta):
+        salida = set()
+        with open(ruta, encoding='utf-8') as f:
+            arbol = ast.parse(f.read())
+        for nodo in ast.walk(arbol):
+            if isinstance(nodo, ast.ImportFrom):
+                if nodo.module is None and nodo.level == 1:
+                    salida.update(a.name for a in nodo.names)
+                elif nodo.module == 'nucleo' and nodo.level == 0:
+                    salida.update(a.name for a in nodo.names)
+                elif nodo.module and nodo.level == 0 and nodo.module.startswith('nucleo.'):
+                    salida.add(nodo.module.split('.')[1])
+                elif nodo.module and nodo.level == 1:
+                    salida.add(nodo.module)
+            elif isinstance(nodo, ast.Import):
+                salida.update(a.name.split('.')[1] for a in nodo.names if a.name.startswith('nucleo.'))
+        return salida
+
+    def ruta(modulo):
+        base = os.path.join(raiz, 'api', 'resenas')
+        return os.path.join(base, 'app.py') if modulo == 'app' else os.path.join(base, 'nucleo', modulo + '.py')
+
+    cierre, pendientes = set(), ['app']
+    while pendientes:
+        modulo = pendientes.pop()
+        if modulo in cierre:
+            continue
+        cierre.add(modulo)
+        pendientes.extend(d for d in importados(ruta(modulo)) if os.path.exists(ruta(d)))
+    return cierre
+
+
+def zip_aviso(raiz, salida):
+    """Paquete mínimo: MODULOS_AVISO con fechas fijas (mismo contenido, mismo SHA). Imprime el CodeSha256."""
+    with zipfile.ZipFile(salida, 'w', zipfile.ZIP_DEFLATED) as z:
+        for nombre in MODULOS_AVISO:
+            info = zipfile.ZipInfo(nombre, date_time=(1980, 1, 1, 0, 0, 0))
+            info.external_attr = 0o644 << 16
+            z.writestr(info, _bytes(os.path.join(raiz, 'api', 'resenas', *nombre.split('/'))),
+                       compress_type=zipfile.ZIP_DEFLATED)
+    print(base64.b64encode(hashlib.sha256(_bytes(salida)).digest()).decode('ascii'))
+    return 0
+
+
+def _motivo(nombre):
+    if nombre in MODULOS_AVISO:
+        return 'necesario: lo importa app.py o el cierre de imports del aviso'
+    return 'no lo importa el aviso: no se incluye'
+
+
+def comparar_paquetes(desplegado, propuesto):
+    """Lista exacta de archivos que cambian entre el paquete desplegado y el propuesto."""
+    def contenidos(ruta):
+        with zipfile.ZipFile(ruta) as z:
+            return {n: z.read(n) for n in z.namelist() if n.endswith('.py')}
+    viejo, nuevo = contenidos(desplegado), contenidos(propuesto)
+    lineas, cuenta = [], Counter()
+    for nombre in sorted(set(viejo) | set(nuevo)):
+        if nombre not in viejo:
+            cuenta['nuevos'] += 1
+            lineas.append(f'INFO: NUEVO   {nombre}  ({_motivo(nombre)})')
+        elif nombre not in nuevo:
+            cuenta['se_quitan'] += 1
+            lineas.append(f'INFO: SOBRA   {nombre}  (el paquete propuesto no lo incluye: app.py no lo importa)')
+        elif viejo[nombre] != nuevo[nombre]:
+            cuenta['cambian'] += 1
+            lineas.append(f'INFO: CAMBIA  {nombre}  ({_motivo(nombre)})')
+        else:
+            cuenta['iguales'] += 1
+            lineas.append(f'INFO: IGUAL   {nombre}')
+    lineas.append(f"INFO: resumen: {cuenta['cambian']} cambian, {cuenta['nuevos']} nuevos, "
+                  f"{cuenta['se_quitan']} se quitan, {cuenta['iguales']} iguales")
+    return lineas
+
+
+def env_nuevo(config, admin, salida):
+    """Variables actuales + solo las nuevas. Nunca reemplaza un valor existente en silencio ni activa el flag."""
+    actuales = _variables(_cargar(config))
+    de_admin = _variables(_cargar(admin))
+    lineas, nuevas = [], {}
+    for nombre in VARIABLES_PUBLICAS_NUEVAS:
+        valor = de_admin.get(nombre) or ''
+        if not valor:
+            lineas.append(f'FAIL: la Lambda admin no tiene {nombre}: no hay de dónde tomarla')
+            continue
+        if nombre in CORREOS and not PATRON_CORREO.fullmatch(valor):
+            lineas.append(f'FAIL: el valor de {nombre} en la Lambda admin no tiene formato de correo')
+            continue
+        mostrado = redactar(valor) if nombre in CORREOS else valor
+        if nombre in actuales:
+            if actuales[nombre] == valor:
+                lineas.append(f'INFO: {nombre} ya está igual en la Lambda pública')
+            else:
+                lineas.append(f'FAIL: {nombre} existe en la Lambda pública con otro valor: no se pisa, revisar')
+            continue
+        nuevas[nombre] = valor
+        lineas.append(f'INFO: AÑADE    {nombre} = {mostrado}')
+    flag = actuales.get(FLAG)
+    if flag is not None and str(flag).lower() != 'false':
+        lineas.append(f'FAIL: {FLAG} está en {flag} en la Lambda pública: no se despliega con avisos encendidos')
+    elif flag is None:
+        nuevas[FLAG] = 'false'
+        lineas.append(f'INFO: AÑADE    {FLAG} = false')
+    else:
+        lineas.append(f'INFO: {FLAG} ya está en false')
+    if any(l.startswith('FAIL') for l in lineas):
+        return lineas
+    final = dict(actuales)
+    final.update(nuevas)
+    _guardar(salida, {'Variables': final})
+    lineas.append(f'INFO: variables finales: {len(final)} ({len(actuales)} preservadas, {len(nuevas)} añadidas)')
+    return lineas
+
+
+def muestra_sentencias(plantilla):
+    """Sentencias del aviso tal como están en la plantilla, con sus placeholders: el diff de IAM sin correos reales."""
+    with open(plantilla, encoding='utf-8') as f:
+        sentencias = {s['Sid']: s for s in json.load(f)['Statement'] if 'Sid' in s}
+    for sid in (SID_SES, SID_AVISOS):
+        print(f'INFO: {sid}')
+        print(json.dumps(sentencias[sid], indent=2, ensure_ascii=False))
+    return 0
+
+
+def politica_fusion(live, plantilla, bucket, origen, destino, cuenta, salida):
+    """Agrega solo las sentencias del aviso que faltan. Nunca quita, reordena ni cambia las existentes."""
+    esperadas = _renderizar(plantilla, {'RESENAS_BUCKET': bucket, 'RESENAS_FROM_EMAIL': origen,
+                                        'RESENAS_ADMIN_EMAIL': destino, 'AWS_REGION': REGION, 'ACCOUNT_ID': cuenta})
+    if SID_SES not in esperadas or SID_AVISOS not in esperadas:
+        return ['FAIL: la plantilla no genera las sentencias del aviso']
+    documento = _cargar(live)
+    documento = documento.get('PolicyDocument', documento)
+    existentes = _lista(documento.get('Statement'))
+    vivas = {s.get('Sid'): s for s in existentes}
+    lineas, anadir = [], []
+    for sid in (SID_SES, SID_AVISOS):
+        if sid not in vivas:
+            anadir.append(esperadas[sid])
+            lineas.append(f'INFO: AÑADIR     {sid}')
+        elif _normal(vivas[sid]) == _normal(esperadas[sid]):
+            lineas.append(f'INFO: YA PRESENTE {sid}')
+        else:
+            lineas.append(f'FAIL: {sid} existe con otro contenido: no se cambia en automático, revisar')
+    if any(l.startswith('FAIL') for l in lineas):
+        return lineas
+    if not anadir:
+        lineas.append('INFO: sin cambios: el rol ya tiene el aviso')
+        return lineas
+    _guardar(salida, {'Version': documento.get('Version', '2012-10-17'), 'Statement': existentes + anadir})
+    lineas.append(f'INFO: documento fusionado: {len(existentes)} sentencias existentes sin cambios y {len(anadir)} nuevas')
+    return lineas
+
+
+def _dato(ruta):
+    """Valor de un JSON de snapshot; un archivo que dice ausente se devuelve como None."""
+    doc = _cargar(ruta)
+    return None if isinstance(doc, dict) and doc.get('ausente') else doc
+
+
+def instantanea(config, zip_codigo, url, recurso, concurrencia, cloudfront, export_sha, carpeta):
+    """Foto de lo que la Fase A no debe cambiar. Escribe cada parte en la carpeta (600)."""
+    os.makedirs(carpeta, exist_ok=True)
+    for nombre, origen in (('config.json', config), ('url.json', url), ('recurso.json', recurso),
+                           ('concurrencia.json', concurrencia)):
+        _guardar(os.path.join(carpeta, nombre), _cargar(origen))
+    # Solo lo que cambia cuando alguien toca la distribución. InProgressInvalidationBatches cambia solo, sin cambio de config.
+    distribucion = _cargar(cloudfront).get('Distribution') or {}
+    _guardar(os.path.join(carpeta, 'cloudfront.json'), {'ETag': _cargar(cloudfront).get('ETag'),
+                                                       'Estado': distribucion.get('Status'),
+                                                       'UltimaModificacion': distribucion.get('LastModifiedTime')})
+    shutil.copyfile(zip_codigo, os.path.join(carpeta, 'desplegado.zip'))
+    os.chmod(os.path.join(carpeta, 'desplegado.zip'), 0o600)
+    with open(os.path.join(carpeta, 'codigo.sha'), 'w', encoding='utf-8') as f:
+        f.write(base64.b64encode(hashlib.sha256(_bytes(zip_codigo)).digest()).decode('ascii'))
+    with open(os.path.join(carpeta, 'export.sha'), 'w', encoding='utf-8') as f:
+        f.write(export_sha.strip())
+    for nombre in os.listdir(carpeta):
+        os.chmod(os.path.join(carpeta, nombre), 0o600)
+    os.chmod(carpeta, 0o700)
+    return 0
+
+
+def comparar_politica(antes, despues):
+    """Toda sentencia que tenía el rol antes sigue igual después. Lo que se agregó no cuenta aquí."""
+    def sentencias(ruta):
+        doc = _cargar(ruta)
+        doc = doc.get('PolicyDocument', doc)
+        return {json.dumps(s, sort_keys=True): s for s in _lista(doc.get('Statement'))}
+    viejas, nuevas = sentencias(antes), sentencias(despues)
+    perdidas = [s.get('Sid', '(sin Sid)') for k, s in viejas.items() if k not in nuevas]
+    if perdidas:
+        return [f"FAIL: se perdieron o cambiaron sentencias existentes: {', '.join(perdidas)}"]
+    return [f'PASS: las {len(viejas)} sentencias anteriores siguen iguales; se agregaron {len(nuevas) - len(viejas)}']
+
+
+def config_iam(config, admin, salida):
+    """Configuración para verificar la política: bucket de la Lambda pública y correos de la Lambda admin (la misma
+    fuente que usa la fusión, así la verificación no depende de si la Fase A ya cambió el Environment)."""
+    de_admin = _variables(_cargar(admin))
+    variables = {'RESENAS_BUCKET': _variables(_cargar(config)).get('RESENAS_BUCKET'),
+                 'RESENAS_FROM_EMAIL': de_admin.get('RESENAS_FROM_EMAIL'),
+                 'RESENAS_ADMIN_EMAIL': de_admin.get('RESENAS_ADMIN_EMAIL')}
+    _guardar(salida, {'Environment': {'Variables': variables}})
+    return 0
+
+
+def _leer_texto(ruta):
+    with open(ruta, encoding='utf-8') as f:
+        return f.read().strip()
+
+
+def verificar_publico(antes, despues, codesha, admin):
+    """PASS/FAIL de la Fase A: flag apagado, correos del admin, y todo lo demás igual que antes."""
+    a, d = os.path.join(antes, 'config.json'), os.path.join(despues, 'config.json')
+    cfg_a, cfg_d = _cargar(a), _cargar(d)
+    vars_a, vars_d = _variables(cfg_a), _variables(cfg_d)
+    vars_admin = _variables(_cargar(admin))
+    lineas = []
+
+    def marca(condicion, texto):
+        lineas.append(('PASS: ' if condicion else 'FAIL: ') + texto)
+
+    marca(cfg_d.get('State') == 'Active' and cfg_d.get('LastUpdateStatus') == 'Successful',
+          'ork3d-resenas Active y LastUpdateStatus Successful')
+    marca(_leer_texto(os.path.join(despues, 'codigo.sha')) == codesha,
+          'código desplegado = paquete propuesto (CodeSha256 esperado)')
+    flag = vars_d.get(FLAG)
+    marca(flag is None or str(flag).lower() == 'false', f'{FLAG} apagado (ausente o false)')
+    for nombre in VARIABLES_PUBLICAS_NUEVAS:
+        esperado = vars_admin.get(nombre)
+        marca(bool(esperado) and vars_d.get(nombre) == esperado,
+              f'{nombre} igual que en la Lambda admin' + (f' ({redactar(esperado)})' if nombre in CORREOS else ''))
+    preservadas = [k for k in vars_a if vars_d.get(k) == vars_a[k]]
+    marca(len(preservadas) == len(vars_a),
+          f'variables anteriores preservadas: {len(preservadas)} de {len(vars_a)}')
+    for campo in CAMPOS_CONFIG:
+        marca(cfg_a.get(campo) == cfg_d.get(campo), f'{campo} igual que antes')
+    for nombre, etiqueta in (('url.json', 'Function URL igual que antes'),
+                             ('recurso.json', 'resource policy de la Lambda igual que antes'),
+                             ('concurrencia.json', 'concurrencia igual que antes'),
+                             ('cloudfront.json', 'CloudFront (ETag y estado) igual que antes')):
+        marca(_cargar(os.path.join(antes, nombre)) == _cargar(os.path.join(despues, nombre)), etiqueta)
+    marca(_leer_texto(os.path.join(antes, 'export.sha')) == _leer_texto(os.path.join(despues, 'export.sha')),
+          'export público sin cambios (si cambió, revisar si fue una reseña aprobada)')
+    return lineas
+
+
+def comparar_restauracion(antes, despues):
+    cfg_a, cfg_d = _cargar(os.path.join(antes, 'config.json')), _cargar(os.path.join(despues, 'config.json'))
+    lineas = []
+    vars_a, vars_d = _variables(cfg_a), _variables(cfg_d)
+    marca = lambda c, t: lineas.append(('PASS: ' if c else 'FAIL: ') + t)
+    marca(vars_a == vars_d, 'variables exactamente como antes del despliegue')
+    marca(_leer_texto(os.path.join(antes, 'codigo.sha')) == _leer_texto(os.path.join(despues, 'codigo.sha')),
+          'código exactamente como antes del despliegue')
+    marca(cfg_d.get('LastUpdateStatus') == 'Successful', 'LastUpdateStatus Successful tras revertir')
+    return lineas
+
+
 def main(argv):
     orden, args = argv[0], argv[1:]
     try:
@@ -236,7 +527,27 @@ def main(argv):
         if orden == 'plan-revertir':
             plan_revertir(*args)
             return 0
-        if orden == 'politica':
+        if orden == 'zip-aviso':
+            return zip_aviso(*args)
+        if orden == 'env-nuevo':
+            lineas = env_nuevo(*args)
+        elif orden == 'muestra-sentencias':
+            return muestra_sentencias(*args)
+        elif orden == 'politica-fusion':
+            lineas = politica_fusion(*args)
+        elif orden == 'instantanea':
+            return instantanea(*args)
+        elif orden == 'comparar-paquetes':
+            lineas = comparar_paquetes(*args)
+        elif orden == 'verificar-publico':
+            lineas = verificar_publico(*args)
+        elif orden == 'comparar-restauracion':
+            lineas = comparar_restauracion(*args)
+        elif orden == 'comparar-politica':
+            lineas = comparar_politica(*args)
+        elif orden == 'config-iam':
+            return config_iam(*args)
+        elif orden == 'politica':
             lineas = politica(*args)
         elif orden == 'codigo':
             lineas = codigo(*args)
@@ -246,7 +557,7 @@ def main(argv):
             lineas = logs(*args)
         else:
             raise SystemExit(f'orden desconocida: {orden}')
-    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         print(f'FAIL: no se pudo leer o procesar ({type(exc).__name__})')
         return 1
     for linea in lineas:

@@ -908,18 +908,21 @@ existe `notificaciones/<id>.json`.
 **Reversión.** `revertir` restaura exactamente la configuración guardada (la flag vuelve a no estar, o al valor de
 antes). Las reseñas no cambian.
 
-**Riesgos conocidos, no bloqueantes:**
+**Riesgos y su estado (revisado en la preparación de la Fase A):**
 
-- Latencia: el cliente SES usa `connect_timeout=3`, `read_timeout=3` y 2 intentos, y la Lambda pública tiene
-  `Timeout=10`. Con SES lento o caído, el aviso puede tardar más que el timeout de la Lambda después de guardar la
-  reseña. La reseña no se pierde, pero el cliente puede ver un error y reintentar contra el claim ya usado. Con SES sano el aviso es una llamada corta (no medida desde aquí). Mitigación de código (un solo intento, timeouts de 2 s) en el próximo despliegue
-  público; no se hace en esta activación.
-- Si el registro `notificaciones/<id>.json` falla después de enviar el correo, el aviso sale pero queda registrado
-  como `aviso_fallido`, y el botón "reenviar aviso" del panel podría enviarlo de nuevo.
-- La Lambda pública puede seguir con el `registro.py` anterior (sanitizador de `bc58135`). El aviso no escribe
-  valores tipo token en los logs, pero el despliegue público con `registro.py` nuevo sigue pendiente.
-- El panel admin construye su servicio de correo siempre (`admin_app.py`), no depende de este flag. Su "reenviar aviso"
-  no cambia con esta activación.
+- Latencia. Resuelto en el código: SES usa `connect_timeout=2`, `read_timeout=2` y un solo intento; el almacén de
+  reservas usa 1 s y 1 s. El peor caso del aviso es 8 s (`PEOR_CASO_AVISO_S`) frente al timeout de 10 s de la Lambda
+  pública, y la reseña ya está guardada cuando el aviso corre. Tests: `TiempoDelAvisoTest`.
+- Duplicados. Resuelto: la reserva `notificaciones/<id>.json` se crea con escritura condicional **antes** de enviar.
+  Dos llamadas (submit, reenvío del panel, concurrencia) producen un solo correo. Solo un rechazo de SES
+  (respuesta con error) libera la reserva. Un timeout o un error desconocido la deja: puede haber salido el correo,
+  así que no se reenvía solo. Ventana que queda: si la Lambda muere entre la reserva y el envío, el aviso se pierde,
+  pero no se duplica; el panel mostrará el aviso como enviado y no permitirá reenviarlo.
+- Pérdida de reseñas con SES caído. Sin cambios: la reseña y el claim se guardan antes del aviso; el aviso nunca
+  levanta excepción (`HookPublicoTest`, `SubmitConAvisoTest`).
+- La Lambda admin usa el mismo `nucleo/correo.py`. Su código del repo cambia, así que un despliegue futuro del admin
+  mostrará `CODIGO_DISTINTO` y necesitará `ALLOW_ADMIN_CODE_UPDATE=1`. Esta fase no toca el admin.
+- El panel construye su servicio de correo siempre (`admin_app.py`). Su "reenviar aviso" no depende del flag.
 
 **Procedimiento (una sola línea en EC2).** Solo después de que `prod-lectura-v2.sh` dé PASS con el flag en `false`:
 
@@ -938,3 +941,81 @@ moderador el aviso, y luego `REVIEW_ID=<id> infra/notify-activacion.sh observar`
 
 **Si algo sale mal:** `ALLOW_NOTIFY_ENABLE=1 infra/notify-activacion.sh revertir`, y después
 `infra/prod-lectura-v2.sh` con el valor por defecto.
+
+## 20. Fase A: código público del aviso con las notificaciones apagadas
+
+Estado: **preparado, no desplegado**. Fase A = código, variables e IAM del aviso, con `RESENAS_NOTIFY_ENABLED=false`.
+Fase B (encender el flag) es otro paso, con su propio preflight. No se mezclan.
+
+**Paquete.** Solo `app.py` y el cierre de imports que `app.py` usa (`nucleo/__init__.py`, `almacen`, `correo`, `errores`,
+`jpeg`, `registro`, `tokens`). El cierre se calcula desde el código y lo verifica `FormasDeLaAyudaTest` en `test_notify_publico`.
+No entran `bloqueo`, `publicacion`, `reglas` ni `sesion`: `app.py` no los importa. Por eso `registro.py` sí cambia: lo
+importa `correo.py`, y su versión de HEAD trae el sanitizador de logs. Eso no es un cambio incidental.
+
+**Variables nuevas** (valores tomados de la Lambda admin, nunca escritos en el repo; el script no imprime los correos):
+
+| Variable | Valor | Por qué |
+| --- | --- | --- |
+| `RESENAS_FROM_EMAIL` | de `ork3d-resenas-admin` | remitente del aviso |
+| `RESENAS_ADMIN_EMAIL` | de `ork3d-resenas-admin` | destinatario del aviso |
+| `RESENAS_ADMIN_BASE_URL` | de `ork3d-resenas-admin` (`https://ork3d.com`) | enlace al panel en el correo |
+| `RESENAS_NOTIFY_ENABLED` | `false` | el flag queda apagado en la Fase A |
+
+Si la Lambda pública ya tiene una de estas variables con otro valor, el script se niega: no la pisa en silencio.
+El Environment se escribe completo: actuales + nuevas. Nunca un mapa parcial.
+
+**IAM.** `infra/notify-public-iam.sh` agrega solo lo que falta a la política `resenas-bucket-privado` del rol
+`ork3d-resenas-lambda`:
+
+- `NotificarNuevaResenaAlModerador`: `ses:SendEmail` con `Resource` `arn:aws:ses:us-east-1:<cuenta>:identity/<remitente>`
+  y condiciones `ses:FromAddress` = remitente y `ses:Recipients` = moderador.
+- `GuardarAvisosDeNotificacion`: `s3:PutObject` solo en `<bucket>/notificaciones/*`. Hace falta para la reserva del aviso.
+  Es el único permiso S3 nuevo y está acotado a ese prefijo.
+
+No cambia ninguna otra sentencia, ni CloudFront, ni la Lambda. Si una sentencia con el mismo `Sid` existe con otro
+contenido, el script se detiene. Guarda la política anterior en `/tmp/ork3d-notify-public/rollback/` (600) antes de escribir.
+
+**Invariantes de la Fase A** (`verify` compara con una foto tomada antes del despliegue):
+
+- `ork3d-resenas` Active y `LastUpdateStatus` Successful; `CodeSha256` = paquete propuesto.
+- `RESENAS_NOTIFY_ENABLED` ausente o `false`; los tres valores nuevos iguales a los del admin.
+- Todas las variables anteriores iguales; `Role`, `Runtime`, `Handler`, `Timeout` y `MemorySize` iguales.
+- Function URL y resource policy de la Lambda iguales; concurrencia igual.
+- CloudFront (ETag, estado y última modificación de la distribución) igual.
+- Export público igual. Si cambió porque se aprobó una reseña, `verify` lo marca para revisar: es un FAIL a propósito.
+
+DNS no se toca: ninguno de los scripts llama a Route53, y eso lo comprueba un test estático.
+
+**Rollback.** `ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY=1 infra/notify-public-code-deploy.sh revertir` restaura el Environment
+guardado (exacto) y el código guardado (con su CodeSha256 comprobado antes de subirlo), y después compara con la foto.
+Para la IAM, la copia `politica-antes.*.json` tiene el documento anterior: `jq .PolicyDocument <copia> > /tmp/politica.json`
+y `aws iam put-role-policy --role-name ork3d-resenas-lambda --policy-name resenas-bucket-privado --policy-document file:///tmp/politica.json`.
+Con el flag apagado, dejar la sentencia de más no tiene efecto.
+
+**Bloque EC2 de la Fase A** (una sola cadena; cada paso corta la cadena si falla):
+
+```bash
+cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
+  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr \
+  && infra/notify-public-code-deploy.sh diff \
+  && ALLOW_NOTIFY_PUBLIC_IAM=1 infra/notify-public-iam.sh aplicar \
+  && ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY=1 infra/notify-public-code-deploy.sh deploy \
+  && infra/notify-public-iam.sh verify \
+  && infra/notify-public-code-deploy.sh verify \
+  && infra/notify-activacion.sh preflight \
+  && PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh
+```
+
+Si `diff` dice `NO LISTO`, la cadena se corta antes de escribir. Si `deploy` falla a mitad, la cadena se corta y el
+mensaje indica `revertir`.
+
+**Resultado esperado**: `diff` lista `CAMBIA app.py`, `NUEVO nucleo/correo.py`, `CAMBIA nucleo/registro.py`,
+`IGUAL` para el resto del cierre, y `SOBRA` para lo que `app.py` no importa; las variables a `AÑADE` con los correos
+redactados (`r***@e***.test` en el formato del repo); `LISTO para desplegar`. `aplicar` escribe la política o dice
+`IAM sin cambios`. `deploy` termina con `Fase A aplicada: código nuevo y RESENAS_NOTIFY_ENABLED=false`. `preflight`
+termina con `LISTO PARA ACTIVAR`. `prod-lectura-v2.sh` da PASS en todo, incluido el flag apagado.
+
+**Regresión V1 de solo lectura** (sin crear reseñas): `PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh`
+cubre `/`, `/opinar/<token inexistente>`, `/opiniones` (accesible, `noindex, follow`, sin enlace desde home, fuera del
+sitemap), `/admin/resenas` y `/admin/entrar`, la API admin sin cookie (401), el export (allowlist) y las fotos públicas.
+

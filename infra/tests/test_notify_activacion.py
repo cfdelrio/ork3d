@@ -184,12 +184,18 @@ class PreflightTest(NotifyCase):
         self.assertEqual(r.returncode, 1, self.salida(r))
         self.assertIn('nucleo/correo.py difiere de HEAD', self.salida(r))
 
-    def test_registro_distinto_no_bloquea_pero_se_informa(self):
+    def test_registro_distinto_bloquea_porque_correo_lo_importa(self):
         original = leer_repo('api', 'resenas', 'nucleo', 'registro.py')
         self.preparar(modificados={'nucleo/registro.py': original + b'\n# version anterior de prueba\n'})
         r = self.correr('preflight')
+        self.assertEqual(r.returncode, 1, self.salida(r))
+        self.assertIn('nucleo/registro.py difiere de HEAD', self.salida(r))
+
+    def test_modulo_fuera_del_cierre_solo_se_informa(self):
+        self.preparar(modificados={'nucleo/sesion.py': b'# modulo que el aviso no importa\n'})
+        r = self.correr('preflight')
         self.assertEqual(r.returncode, 0, self.salida(r))
-        self.assertIn('INFO: nucleo/registro.py difiere de HEAD', self.salida(r))
+        self.assertIn('INFO: nucleo/sesion.py está en el paquete pero el aviso no lo importa', self.salida(r))
 
     def test_politica_sin_sentencia_ses_bloquea(self):
         politica = politica_esperada()

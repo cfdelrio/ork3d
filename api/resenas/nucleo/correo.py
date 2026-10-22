@@ -16,6 +16,22 @@ Correo = namedtuple('Correo', 'origen destino asunto texto html')
 
 LIMITE_COMENTARIO = 280
 
+# Límites del aviso (best-effort). Peor caso por reseña: reservar en S3 (2 s) + enviar en SES (4 s) + liberar la
+# reserva en S3 solo si SES rechazó (2 s) = 8 s. La Lambda pública tiene 10 s y la reseña ya está guardada: el aviso
+# nunca debe acercarse a ese límite. Un solo intento: un reintento multiplicaría el peor caso.
+CONFIG_SES = {'connect_timeout': 2, 'read_timeout': 2, 'retries': {'max_attempts': 1}}
+CONFIG_AVISOS_S3 = {'connect_timeout': 1, 'read_timeout': 1, 'retries': {'max_attempts': 1}}
+PEOR_CASO_AVISO_S = 8
+
+
+def _es_respuesta_de_error(exc):
+    """SES respondió con un error (ClientError de botocore, o su doble): el correo no salió.
+
+    Un timeout, una conexión cortada o cualquier otra excepción no dice nada sobre el envío: puede haber salido.
+    """
+    respuesta = getattr(exc, 'response', None)
+    return isinstance(respuesta, dict) and 'Error' in respuesta
+
 
 def _e(valor):
     return _html.escape(str(valor), quote=True)
@@ -114,7 +130,7 @@ class ServicioCorreo:
 
 
 class SESCorreo(ServicioCorreo):
-    """Envío con SES (SendEmail). Recibe un cliente boto3 'ses' ya configurado."""
+    """Envío con SES (SendEmail). Recibe un cliente boto3 'ses' ya configurado con CONFIG_SES."""
 
     def __init__(self, cliente):
         self.cliente = cliente
@@ -134,26 +150,47 @@ class SESCorreo(ServicioCorreo):
         return (respuesta or {}).get('MessageId')
 
 
-def notificar_resena(servicio, almacen, bucket, resena, *, base_url, origen, destino,
-                     ahora):
-    """Envía el aviso y registra notificaciones/<id>.json. Devuelve True/False. Nunca levanta."""
+def _liberar(almacen, bucket, clave, resena_id):
+    try:
+        almacen.borrar(bucket, clave)
+    except Exception as exc:
+        _registro.evento('aviso_liberacion_fallida', review_id=resena_id, error=type(exc).__name__)
+
+
+def notificar_resena(servicio, almacen, bucket, resena, *, base_url, origen, destino, ahora):
+    """Aviso de una reseña, como máximo un correo por reseña. Devuelve True si el correo salió. Nunca levanta.
+
+    1. Reserva notificaciones/<id>.json con escritura condicional (solo si no existe) ANTES de enviar. Si ya existe,
+       no se envía. Si la reserva falla por otra causa, no se envía: nunca hay correo sin reserva.
+    2. Envía. Si SES respondió con un error, el correo no salió: se libera la reserva para permitir un reenvío
+       manual desde el panel.
+    3. Si el envío pudo salir (timeout, conexión cortada u otro error), la reserva se queda. Eso puede perder un
+       aviso, pero nunca lo duplica.
+    """
+    rid = resena.get('id')
     try:
         correo = construir_resena(resena, base_url, origen, destino)
     except Exception as exc:
-        _registro.evento('aviso_fallido', review_id=resena.get('id'), error=type(exc).__name__)
+        _registro.evento('aviso_fallido', review_id=rid, error=type(exc).__name__, resultado='no_construido')
+        return False
+    clave = f'notificaciones/{rid}.json'
+    try:
+        almacen.escribir_json(bucket, clave, {'v': 2, 'reservado': ahora.strftime('%Y-%m-%dT%H:%M:%SZ')},
+                              solo_si_no_existe=True)
+    except errores.ErrorConflicto:
+        _registro.evento('aviso_ya_registrado', review_id=rid)
+        return False
+    except Exception as exc:
+        _registro.evento('aviso_fallido', review_id=rid, error=type(exc).__name__, resultado='sin_reserva')
         return False
     try:
         servicio.enviar(correo)
     except Exception as exc:
-        _registro.evento('aviso_fallido', review_id=resena['id'], error=type(exc).__name__)
+        if _es_respuesta_de_error(exc):
+            _liberar(almacen, bucket, clave, rid)
+            _registro.evento('aviso_fallido', review_id=rid, error=type(exc).__name__, resultado='rechazado')
+        else:
+            _registro.evento('aviso_fallido', review_id=rid, error=type(exc).__name__, resultado='incierto')
         return False
-    try:
-        almacen.escribir_json(bucket, f"notificaciones/{resena['id']}.json",
-                              {'v': 1, 'enviado': ahora.strftime('%Y-%m-%dT%H:%M:%SZ')},
-                              solo_si_no_existe=True)
-    except errores.ErrorConflicto:
-        pass  # ya había un registro: el aviso salió antes
-    _registro.evento('aviso_enviado', review_id=resena['id'])
+    _registro.evento('aviso_enviado', review_id=rid)
     return True
-
-

@@ -11,7 +11,7 @@ import unittest
 
 import app
 from admin_fixtures import BASE, CONTACTO, DESTINO, FEEDBACK, INICIO, ORIGEN, PEDIDO, PRIVADO, REMITENTE
-from fakes import FakeS3, FakeSES
+from fakes import FakeClientError, FakeS3, FakeSES
 from nucleo import correo as _correo
 from nucleo.almacen import Almacen
 
@@ -151,7 +151,7 @@ class NotificarTest(unittest.TestCase):
         self.assertTrue(self.notificar())
         self.assertEqual(len(self.ses.enviados), 1)
         registro = json.loads(self.s3.objects[f'notificaciones/{RID}.json'])
-        self.assertEqual(registro, {'v': 1, 'enviado': '2026-10-21T12:00:00Z'})
+        self.assertEqual(registro, {'v': 2, 'reservado': '2026-10-21T12:00:00Z'})
 
     def test_fallo_de_ses_devuelve_false_sin_registro_y_sin_levantar(self):
         self.ses.fallar_proximo()
@@ -163,10 +163,10 @@ class NotificarTest(unittest.TestCase):
         self.assertFalse(_correo.notificar_resena(self.ses, self.almacen, PRIVADO, {'id': RID}, base_url=BASE,
                                                   origen=REMITENTE, destino=DESTINO, ahora=INICIO))
 
-    def test_registro_existente_no_impide_otro_envio_explicito(self):
+    def test_una_reserva_existente_impide_un_segundo_correo(self):
         self.assertTrue(self.notificar())
-        self.assertTrue(self.notificar())
-        self.assertEqual(len(self.ses.enviados), 2)
+        self.assertFalse(self.notificar())
+        self.assertEqual(len(self.ses.enviados), 1)
 
 
 class HookPublicoTest(unittest.TestCase):
@@ -238,3 +238,147 @@ class HookPublicoTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReservaDelAvisoTest(unittest.TestCase):
+    """Como máximo un correo por reseña: la reserva existe antes de enviar y solo un rechazo de SES la libera."""
+
+    def setUp(self):
+        self.s3 = FakeS3()
+        self.almacen = Almacen(self.s3)
+        self.ses = FakeSES()
+        self.clave = f'notificaciones/{RID}.json'
+
+    def notificar(self, servicio=None, almacen=None):
+        return _correo.notificar_resena(servicio or self.ses, almacen or self.almacen, PRIVADO, resena(),
+                                        base_url=BASE, origen=REMITENTE, destino=DESTINO, ahora=INICIO)
+
+    def test_la_reserva_ya_existe_cuando_SES_recibe_el_envio(self):
+        visto = {}
+
+        class SESQueMiraLaReserva:
+            def enviar(inner, correo):
+                visto['reserva'] = self.clave in self.s3.objects
+                return 'msg-1'
+
+        self.assertTrue(self.notificar(servicio=SESQueMiraLaReserva()))
+        self.assertTrue(visto['reserva'])
+
+    def test_dos_llamadas_producen_un_solo_correo(self):
+        self.assertTrue(self.notificar())
+        self.assertFalse(self.notificar())
+        self.assertEqual(len(self.ses.enviados), 1)
+
+    def test_rechazo_de_ses_libera_la_reserva_y_el_reenvio_si_sale(self):
+        self.ses.fallar_proximo(FakeClientError('MessageRejected', 400, 'Email address not verified.'))
+        self.assertFalse(self.notificar())
+        self.assertNotIn(self.clave, self.s3.objects)
+        self.assertTrue(self.notificar())
+        self.assertEqual(len(self.ses.enviados), 1)
+
+    def test_timeout_deja_la_reserva_y_no_reenvia_solo(self):
+        self.ses.fallar_proximo(TimeoutError('read timeout simulado'))
+        self.assertFalse(self.notificar())
+        self.assertIn(self.clave, self.s3.objects)
+        self.assertFalse(self.notificar())
+        self.assertEqual(self.ses.enviados, [])
+
+    def test_error_desconocido_de_SES_tampoco_libera(self):
+        self.ses.fallar_proximo(RuntimeError('error inesperado'))
+        self.assertFalse(self.notificar())
+        self.assertIn(self.clave, self.s3.objects)
+
+    def test_si_no_se_puede_reservar_no_se_envia(self):
+        class AlmacenSinEscritura(Almacen):
+            def escribir_json(self, *args, **kwargs):
+                raise OSError('S3 no disponible')
+
+        self.assertFalse(self.notificar(almacen=AlmacenSinEscritura(self.s3)))
+        self.assertEqual(self.ses.enviados, [])
+        self.assertNotIn(self.clave, self.s3.objects)
+
+    def test_el_rechazo_se_clasifica_por_la_respuesta_de_SES(self):
+        self.assertTrue(_correo._es_respuesta_de_error(FakeClientError('Throttling', 400)))
+        self.assertFalse(_correo._es_respuesta_de_error(TimeoutError()))
+        self.assertFalse(_correo._es_respuesta_de_error(ConnectionError()))
+
+
+class TiempoDelAvisoTest(unittest.TestCase):
+    """El aviso es best-effort: su peor caso queda muy por debajo del timeout de la Lambda pública (10 s)."""
+
+    def test_timeouts_acotados_y_un_solo_intento(self):
+        self.assertEqual(_correo.CONFIG_SES, {'connect_timeout': 2, 'read_timeout': 2, 'retries': {'max_attempts': 1}})
+        self.assertEqual(_correo.CONFIG_AVISOS_S3,
+                         {'connect_timeout': 1, 'read_timeout': 1, 'retries': {'max_attempts': 1}})
+
+    def test_peor_caso_reserva_envio_y_liberacion_queda_bajo_10_s(self):
+        def tope(config):
+            return config['connect_timeout'] + config['read_timeout']
+        peor = tope(_correo.CONFIG_AVISOS_S3) + tope(_correo.CONFIG_SES) + tope(_correo.CONFIG_AVISOS_S3)
+        self.assertEqual(peor, _correo.PEOR_CASO_AVISO_S)
+        self.assertLess(peor, 10)
+
+
+class SubmitConAvisoTest(unittest.TestCase):
+    """Submit-first: la reseña y el claim quedan guardados antes del aviso. Ningún fallo del aviso cambia la respuesta."""
+
+    def setUp(self):
+        self.s3 = FakeS3()
+        self.ses = FakeSES()
+        self.s3.objects[f'tokens/{TH}.json'] = json.dumps({
+            'v': 1, 'created_at': '2026-10-20T10:00:00Z',
+            'expires_at': (INICIO + dt.timedelta(days=60)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'revoked': False, 'product_slug': 'trofeo-acrilico', 'product_label': 'Trofeo acrílico',
+            'category': 'trofeos', 'verified': True, 'order_ref': PEDIDO,
+        }).encode('utf-8')
+        self.svc = app.Service(self.s3, PRIVADO, ORIGEN, base_url=BASE, origen_correo=REMITENTE,
+                               destino_correo=DESTINO, correo=self.ses)
+
+    def payload(self):
+        return {'token': TOKEN, 'rating': 4, 'comment': 'Muy buena compra, llegó a tiempo.',
+                'aspects': ['calidad'], 'display_mode': 'nombre', 'name': 'Ana Gómez',
+                'permission_to_publish': True, 'private_feedback': FEEDBACK,
+                'contact_requested': True, 'contact': CONTACTO, 'website': ''}
+
+    def revision(self, body):
+        return json.loads(self.s3.objects[f"resenas/{body['id']}.json"])
+
+    def test_SES_ok_guarda_la_reseña_el_claim_responde_200_y_envia_una_vez(self):
+        status, body = self.svc.create_review(self.payload())
+        self.assertEqual(status, 200)
+        self.assertEqual(self.revision(body)['status'], 'pending')
+        self.assertIn(f'claims/{TH}.json', self.s3.objects)
+        self.assertEqual(len(self.ses.enviados), 1)
+        self.assertIn(f"notificaciones/{body['id']}.json", self.s3.objects)
+
+    def test_SES_error_inmediato_no_revierte_nada_y_registra_el_fallo(self):
+        self.ses.fallar_proximo(FakeClientError('MessageRejected', 400, 'Email address not verified.'))
+        with self.assertLogs(level='INFO') as cm:
+            status, body = self.svc.create_review(self.payload())
+        self.assertEqual(status, 200)
+        self.assertEqual(self.revision(body)['status'], 'pending')
+        self.assertIn(f'claims/{TH}.json', self.s3.objects)
+        self.assertNotIn(f"notificaciones/{body['id']}.json", self.s3.objects)
+        self.assertTrue(any('"aviso_fallido"' in linea and '"rechazado"' in linea for linea in cm.output))
+
+    def test_SES_timeout_no_pierde_nada_ni_propaga_la_excepcion(self):
+        self.ses.fallar_proximo(TimeoutError('read timeout simulado'))
+        status, body = self.svc.create_review(self.payload())
+        self.assertEqual(status, 200)
+        self.assertEqual(self.revision(body)['status'], 'pending')
+        self.assertIn(f'claims/{TH}.json', self.s3.objects)
+        self.assertIn(f"notificaciones/{body['id']}.json", self.s3.objects)
+
+    def test_notifier_que_explota_no_cambia_la_respuesta(self):
+        from unittest import mock
+        with mock.patch.object(_correo, 'notificar_resena', side_effect=RuntimeError('fallo interno')):
+            status, body = self.svc.create_review(self.payload())
+        self.assertEqual(status, 200)
+        self.assertEqual(self.revision(body)['status'], 'pending')
+        self.assertIn(f'claims/{TH}.json', self.s3.objects)
+
+    def test_el_mismo_token_no_produce_otra_reseña_ni_otro_correo(self):
+        self.assertEqual(self.svc.create_review(self.payload())[0], 200)
+        status, _ = self.svc.create_review(self.payload())
+        self.assertEqual(status, 409)
+        self.assertEqual(len(self.ses.enviados), 1)

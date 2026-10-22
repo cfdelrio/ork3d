@@ -173,12 +173,15 @@ def parse_review(p):
 
 class Service:
     def __init__(self, s3, bucket, allowed_origin, google_review_url=None, *,
-                 correo=None, base_url=None, origen_correo=None, destino_correo=None):
+                 correo=None, base_url=None, origen_correo=None, destino_correo=None, almacen_avisos=None):
         self.s3 = s3
         self.bucket = bucket
         self.allowed_origin = allowed_origin
         self.google_review_url = google_review_url
         self._almacen = Almacen(s3)
+        # Reserva del aviso: con su propio cliente S3 de timeouts cortos (CONFIG_AVISOS_S3), para que nunca
+        # acerque la respuesta al timeout de la Lambda. Sin él, usa el almacén normal.
+        self._almacen_avisos = almacen_avisos or self._almacen
         # Notificación: solo si hay servicio de correo y las tres direcciones/URL configuradas.
         self.correo = correo
         self.base_url = base_url
@@ -336,7 +339,7 @@ class Service:
         if not self.notificar:
             return
         try:
-            _correo.notificar_resena(self.correo, self._almacen, self.bucket, review,
+            _correo.notificar_resena(self.correo, self._almacen_avisos, self.bucket, review,
                                      base_url=self.base_url, origen=self.origen_correo,
                                      destino=self.destino_correo, ahora=_now())
         except Exception as exc:  # defensa: notificar_resena ya no levanta, pero el hook tampoco
@@ -385,9 +388,10 @@ def _service():
         import boto3  # disponible en el runtime de Lambda; no se importa en los tests
         from botocore.config import Config
         correo_svc = None
+        almacen_avisos = None
         if os.environ.get('RESENAS_NOTIFY_ENABLED', 'false').lower() == 'true':
-            cfg = Config(connect_timeout=3, read_timeout=3, retries={'max_attempts': 2})
-            correo_svc = _correo.SESCorreo(boto3.client('ses', config=cfg))
+            correo_svc = _correo.SESCorreo(boto3.client('ses', config=Config(**_correo.CONFIG_SES)))
+            almacen_avisos = Almacen(boto3.client('s3', config=Config(**_correo.CONFIG_AVISOS_S3)))
         _SVC = Service(
             s3=boto3.client('s3'),
             bucket=os.environ['RESENAS_BUCKET'],
@@ -397,6 +401,7 @@ def _service():
             base_url=os.environ.get('RESENAS_ADMIN_BASE_URL') or None,
             origen_correo=os.environ.get('RESENAS_FROM_EMAIL') or None,
             destino_correo=os.environ.get('RESENAS_ADMIN_EMAIL') or None,
+            almacen_avisos=almacen_avisos,
         )
     return _SVC
 

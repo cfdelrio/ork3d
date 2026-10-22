@@ -19,6 +19,7 @@ import sys
 import uuid
 
 FN = 'ork3d-resenas'
+FN_ADMIN = 'ork3d-resenas-admin'
 BOOLEANAS = {'only-show-errors'}
 ESCRITURAS = ('update-', 'put-', 'create-', 'delete-', 'add-', 'remove-', 'publish', 'invoke', 'tag-')
 
@@ -47,12 +48,54 @@ def opciones(args):
     return o, pos
 
 
+def _sha(ruta):
+    import base64
+    import hashlib
+    with open(ruta, 'rb') as f:
+        return base64.b64encode(hashlib.sha256(f.read()).digest()).decode('ascii')
+
+
 def despachar(svc, op, o, st):
     publica = st['publica']
     if (svc, op) == ('lambda', 'get-function-configuration'):
+        if o.get('function-name') == FN_ADMIN:
+            return st['admin']['config']
         if o.get('function-name') != FN:
             raise Fallo('ResourceNotFoundException', 'Function not found', op)
         return publica['config']
+    if (svc, op) == ('lambda', 'get-function-url-config'):
+        if st.get('url') is None:
+            raise Fallo('ResourceNotFoundException', 'Function URL config not found', op)
+        return st['url']
+    if (svc, op) == ('lambda', 'get-policy'):
+        if st.get('recurso') is None:
+            raise Fallo('ResourceNotFoundException', 'The resource you requested does not exist.', op)
+        return st['recurso']
+    if (svc, op) == ('lambda', 'get-function-concurrency'):
+        return st.get('concurrencia', {})
+    if (svc, op) == ('lambda', 'update-function-code'):
+        if o.get('revision-id') != publica['config']['RevisionId']:
+            raise Fallo('PreconditionFailedException', 'The Revision Id provided does not match the latest Revision Id.', op)
+        if os.environ.get('FAKE_NOTIFY_FALLA_CODIGO') == '1':
+            raise Fallo('InvalidParameterValueException', 'falla simulada del código', op)
+        ruta = o['zip-file'][len('fileb://'):]
+        publica['config']['CodeSha256'] = _sha(ruta)
+        publica['config']['RevisionId'] = str(uuid.uuid4())
+        publica['config']['LastUpdateStatus'] = 'Successful'
+        # Lo que devuelve Code.Location a partir de ahora: el paquete subido (lo sirve aws_fake_curl.py).
+        with open(ruta, 'rb') as f:
+            contenido = f.read()
+        with open(os.environ['FAKE_CODIGO_ANTERIOR_ARCHIVO'], 'wb') as f:
+            f.write(contenido)
+        return {'FunctionName': FN, 'CodeSha256': publica['config']['CodeSha256']}
+    if (svc, op) == ('iam', 'put-role-policy'):
+        if os.environ.get('FAKE_NOTIFY_FALLA_IAM') == '1':
+            raise Fallo('MalformedPolicyDocument', 'falla simulada de IAM', op)
+        with open(o['policy-document'][len('file://'):], encoding='utf-8') as f:
+            st['politica'] = json.load(f)
+        return None
+    if (svc, op) == ('cloudfront', 'get-distribution'):
+        return st['cloudfront']
     if (svc, op) == ('lambda', 'get-function'):
         return {'Configuration': publica['config'],
                 'Code': {'Location': 'https://fake-code.example/ork3d-resenas.zip'}}
