@@ -2,21 +2,26 @@
 # ORK3D · V2 · publicación del panel admin: páginas, JS y reglas de /admin/entrar y /admin/resenas. Se ejecuta desde EC2.
 #
 # Escribe SOLO estas claves del bucket del sitio: admin-web/entrar.html, admin-web/resenas.html y assets/js/admin-*.js.
-# Función CloudFront ork3d-redirect-www: se publica el repo solo si su código LIVE es el del repo sin el bloque admin
-# (ver infra/admin_frontend_ayuda.py). Si difiere en otra cosa, no se escribe nada. Antes de cualquier escritura guarda
-# copias de rollback de la función, de la metadata y de las claves que ya existían.
+# Función CloudFront ork3d-redirect-www: se publica LIVE + bloque admin (la regla del panel insertada antes del rewrite
+# de extensionless). Nunca se reemplaza LIVE por el repo: la propuesta se verifica (solo se agrega el bloque, no se quita
+# ni cambia nada de LIVE) antes de cualquier escritura. Si LIVE no admite el bloque, no se escribe nada.
+# Antes de escribir guarda rollback de la función LIVE, su metadata, la propuesta y las páginas que ya existían.
 # Invalida solo las rutas del panel. Smoke de lectura al final: hash de cada página, no-store, API 401 y sitio público.
 #
 # Escribe en AWS SOLO con ALLOW_ADMIN_FRONTEND=1. Sin esa variable sale con 3 antes de llamar a AWS.
 # Variables opcionales: ADMIN_DEPLOY_RUTA (rollback, /tmp/ork3d-v2-deploy), FRONT_REINTENTOS (6), FRONT_ESPERA (10 s).
-# Códigos: 0 completo · 1 precheck o paso falló · 2 variable inválida · 3 falta ALLOW_ADMIN_FRONTEND=1 ·
-#          4 la función LIVE difiere del repo en más que el bloque admin · 6 el smoke no coincide.
+# FRONT_SOLO_DIAGNOSTICO=1: solo lee LIVE, compara con el repo (diff semántico y textual) y sale sin escribir nada.
+# Códigos: 0 completo o diagnóstico · 1 precheck o paso falló · 2 variable inválida · 3 falta ALLOW_ADMIN_FRONTEND=1 ·
+#          4 LIVE no admite el bloque admin (o la propuesta cambia algo de LIVE) · 6 el smoke no coincide.
 set -uo pipefail
 
-[[ "${ALLOW_ADMIN_FRONTEND:-}" == "1" ]] || {
-  echo "ABORTA: este script publica el panel en el sitio y actualiza una función de CloudFront. Para ejecutarlo: ALLOW_ADMIN_FRONTEND=1 infra/admin-frontend-deploy.sh" >&2
-  exit 3
-}
+SOLO_DIAGNOSTICO="${FRONT_SOLO_DIAGNOSTICO:-}"
+if [[ "$SOLO_DIAGNOSTICO" != 1 ]]; then
+  [[ "${ALLOW_ADMIN_FRONTEND:-}" == "1" ]] || {
+    echo "ABORTA: este script publica el panel en el sitio y actualiza una función de CloudFront. Para ejecutarlo: ALLOW_ADMIN_FRONTEND=1 infra/admin-frontend-deploy.sh (solo lectura: FRONT_SOLO_DIAGNOSTICO=1 infra/admin-frontend-deploy.sh)" >&2
+    exit 3
+  }
+fi
 
 PERFIL="${AWS_PROFILE:-default}"; REGION="${AWS_REGION:-us-east-1}"
 [[ "$PERFIL" == default ]] || { echo "ERROR: AWS_PROFILE solo puede ser default en este despliegue." >&2; exit 2; }
@@ -91,19 +96,40 @@ done
 python3 "$AYUDA" bloque-admin "$ROOT/infra/redirect-www.js" > /dev/null || fallo "infra/redirect-www.js no tiene el bloque admin completo"
 echo "  rama $RAMA_ESPERADA · HEAD = remoto · páginas noindex · función del repo con bloque admin"
 
-paso "2. Función CloudFront $FN (copias de rollback antes de escribir)"
+paso "2. Función CloudFront $FN: estado, diferencias y propuesta (copias de rollback antes de escribir)"
 "$AWS" cloudfront describe-function --name "$FN" --stage LIVE --output json > "$T/fn-meta.json" 2> "$T/fm.err" \
   || fallo "no se pudo leer la metadata de $FN (código $(detalle "$T/fm.err"))"
 "$AWS" cloudfront get-function --name "$FN" --stage LIVE "$T/fn-live.js" > /dev/null 2> "$T/fg.err" \
   || fallo "no se pudo leer el código LIVE de $FN (código $(detalle "$T/fg.err"))"
 guardar_rollback cloudfront-funcion-admin-LIVE.js "$T/fn-live.js"
 guardar_rollback cloudfront-funcion-admin-meta.json "$T/fn-meta.json"
-COMPARACION="$(python3 "$AYUDA" funcion "$T/fn-live.js" "$ROOT/infra/redirect-www.js")"
-case "$COMPARACION" in
-  IGUAL) echo "  $FN LIVE = repo: sin cambios" ;;
-  ACTUALIZAR) echo "  $FN LIVE = repo sin el bloque admin: se publica el repo (solo se agregan las reglas del panel)" ;;
-  *) distinto "$FN LIVE difiere del repo en más que el bloque admin: no se escribe nada (revisar el código publicado)" ;;
+ESTADO_FN="$(python3 "$AYUDA" estado "$T/fn-live.js" "$ROOT/infra/redirect-www.js")"
+echo "  estado de LIVE frente al repo: $ESTADO_FN"
+echo "  diferencias LIVE vs repo (semánticas; el diff textual completo queda en el archivo indicado):"
+python3 "$AYUDA" diff "$T/fn-live.js" "$ROOT/infra/redirect-www.js" "$RB/cloudfront-funcion-admin-diferencias.$STAMP.txt" \
+  || fallo "no se pudo comparar LIVE con el repo"
+echo "  historial del repo frente a LIVE:"
+python3 "$AYUDA" historial "$T/fn-live.js" "$ROOT" "$GIT" || true
+case "$ESTADO_FN" in
+  PUBLICADA) echo "  $FN ya contiene el bloque admin del repo: no hay nada que publicar en la función" ;;
+  SIN_BLOQUE) echo "  $FN: se publica LIVE + bloque admin (ninguna regla de LIVE se quita ni cambia)" ;;
+  INCOMPATIBLE:*) distinto "$FN no admite el bloque admin (${ESTADO_FN#INCOMPATIBLE: }): no se escribe nada" ;;
+  *) distinto "estado inesperado de $FN: $ESTADO_FN" ;;
 esac
+if [[ "$ESTADO_FN" == SIN_BLOQUE ]]; then
+  python3 "$AYUDA" inyectar "$T/fn-live.js" "$ROOT/infra/redirect-www.js" "$T/fn-propuesta.js" || fallo "no se pudo construir la propuesta"
+  python3 "$AYUDA" verificar "$T/fn-live.js" "$T/fn-propuesta.js" "$ROOT/infra/redirect-www.js" \
+    || distinto "la propuesta cambia algo de LIVE además del bloque admin: no se escribe nada"
+  guardar_rollback cloudfront-funcion-admin-propuesta.js "$T/fn-propuesta.js"
+  echo "  propuesta verificada: LIVE + bloque admin, sin eliminaciones"
+fi
+
+if [[ "$SOLO_DIAGNOSTICO" == 1 ]]; then
+  echo
+  echo "Diagnóstico de solo lectura: no se escribió nada en AWS ni en el sitio."
+  echo "Diff completo: $RB/cloudfront-funcion-admin-diferencias.$STAMP.txt"
+  exit 0
+fi
 
 paso "3. Copias de rollback de las páginas que ya existen"
 for f in "${PAGINAS[@]}"; do
@@ -118,18 +144,19 @@ for f in "${PAGINAS[@]}"; do
 done
 
 paso "4. Escrituras"
-if [[ "$COMPARACION" == ACTUALIZAR ]]; then
+if [[ "$ESTADO_FN" == SIN_BLOQUE ]]; then
   python3 "$AYUDA" config-funcion "$T/fn-meta.json" "$T/fn-config.json" || fallo "configuración de $FN no reconocida"
   "$AWS" cloudfront update-function --name "$FN" --if-match "$(valor "$T/fn-meta.json" ETag)" \
-    --function-config "file://$T/fn-config.json" --function-code "fileb://$ROOT/infra/redirect-www.js" \
+    --function-config "file://$T/fn-config.json" --function-code "fileb://$T/fn-propuesta.js" \
     --output json > "$T/fn-upd.json" 2> "$T/fu.err" || fallo "update-function ($(detalle "$T/fu.err")); copia de rollback en $RB"
   "$AWS" cloudfront publish-function --name "$FN" --if-match "$(valor "$T/fn-upd.json" ETag)" \
     --output json > "$T/fn-pub.json" 2> "$T/fp.err" || fallo "publish-function ($(detalle "$T/fp.err")); copia de rollback en $RB"
   "$AWS" cloudfront get-function --name "$FN" --stage LIVE "$T/fn-verif.js" > /dev/null 2> "$T/fv.err" \
     || fallo "no se pudo releer el código LIVE tras publicar"
-  [[ "$(python3 "$AYUDA" funcion "$T/fn-verif.js" "$ROOT/infra/redirect-www.js")" == IGUAL ]] \
-    || fallo "LIVE no coincide con el repo tras publicar; restaurar desde $RB"
-  echo "  $FN publicada: LIVE = repo"
+  cmp -s "$T/fn-verif.js" "$T/fn-propuesta.js" || fallo "LIVE no coincide con la propuesta tras publicar; restaurar desde $RB"
+  echo "  $FN publicada: LIVE = LIVE + bloque admin (verificado byte a byte)"
+else
+  echo "  $FN: sin cambios (ya contiene el bloque admin)"
 fi
 for f in "${PAGINAS[@]}"; do
   clave="${f%% *}"; tipo="${f#* }"
@@ -141,7 +168,7 @@ python3 "$AYUDA" invalidacion "$T/invalidacion.json" "$STAMP" || fallo "no se pu
 "$AWS" cloudfront create-invalidation --distribution-id "$DIST" --invalidation-batch "file://$T/invalidacion.json" \
   --output json > "$T/inv.json" 2> "$T/inv.err" || fallo "create-invalidation ($(detalle "$T/inv.err"))"
 echo "  invalidación del panel: $(valor "$T/inv.json" Invalidation.Id)"
-echo "CHECKPOINT F2 — páginas y JS publicados; función $FN coincide con el repo"
+echo "CHECKPOINT F2 — páginas y JS publicados; función $FN = LIVE + bloque admin"
 
 paso "5. Smoke (solo lectura)"
 comprueba_pagina() {  # RUTA ARCHIVO_DEL_REPO: 200, cuerpo idéntico al repo y no-store

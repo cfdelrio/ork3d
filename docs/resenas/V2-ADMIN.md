@@ -613,12 +613,18 @@ Escribe solo cinco claves del bucket `ork3d.com`: `admin-web/entrar.html`, `admi
 `assets/js/admin-comun.js`, `assets/js/admin-entrar.js` y `assets/js/admin-panel.js`. Cada una con
 `Cache-Control: no-store, max-age=0`. Las páginas llevan `noindex, nofollow` en el propio HTML.
 
-- Función `ork3d-redirect-www` (la que reescribe `/admin/entrar` y `/admin/resenas`): el código LIVE se compara con
-  `infra/redirect-www.js` (`admin_frontend_ayuda.py funcion`):
-  - `IGUAL`: no se escribe nada.
-  - `ACTUALIZAR`: LIVE es el repo sin el bloque admin. Se publica el repo (update-function y publish-function).
-  - `DISTINTO`: otro cambio en el sitio público. El script sale con 4 y no escribe.
-- Rollback antes de cualquier escritura: código LIVE de la función, su metadata y cada página que ya existía
+- Función `ork3d-redirect-www` (la que reescribe `/admin/entrar` y `/admin/resenas`). No se reemplaza nunca por el
+  repo. Se publica LIVE + bloque admin: el bloque de `infra/redirect-www.js` se inserta antes del rewrite de
+  extensionless (`admin_frontend_ayuda.py inyectar`). Antes de escribir, `verificar` comprueba que quitar el bloque da
+  LIVE byte a byte. Si LIVE ya contiene el bloque, no se escribe. Si LIVE no admite la inserción (no hay ancla, faltan
+  `var request`/`var uri` o ya hay reglas `/admin` en código), el script sale con 4 y no escribe.
+- Diagnóstico de solo lectura: `FRONT_SOLO_DIAGNOSTICO=1 infra/admin-frontend-deploy.sh`. Muestra el estado, las
+  diferencias semánticas (funcional pública preexistente, drift desconocido, formato/comentario, admin nueva), el
+  historial de git que más se parece a LIVE, y deja el diff textual completo en el rollback.
+- Pruebas: `test_admin_frontend.ReglasDeLaFuncionTest` ejecuta el handler real con node. Fuera de `/admin` la propuesta
+  responde igual que LIVE, incluidos `/opinar`, `/opiniones`, www, query strings y trailing slash. Una regla pública
+  propia de LIVE se conserva.
+- Rollback antes de cualquier escritura: código LIVE de la función, su metadata, la propuesta y cada página que ya existía
   (en `ADMIN_DEPLOY_RUTA/rollback`, 600). Una página sin copia previa es una página nueva.
 - Invalidación solo de `/admin/entrar`, `/admin/resenas`, `/admin/resenas/*`, `/admin-web/*` y `/assets/js/admin-*`.
 - Smoke de solo lectura: cada página devuelve el mismo SHA-256 que el repo y `no-store`; `/admin/api/sesion` responde
@@ -655,3 +661,20 @@ Criterios de cada paso:
 
 El límite humano está al final: abrir el enlace `…/admin/entrar#c=…` del correo. El código no se copia a ningún
 registro. Si el enlace no sirve, el acceso no se resuelve automáticamente.
+
+### 16.11 Drift de `ork3d-redirect-www` y scripts que la sobrescriben
+
+Hallazgo del PASO 2: el código LIVE de la función no es el repo sin el bloque admin. El script se detuvo sin escribir
+(código 4), como debía. Ese comportamiento se mantiene; lo que cambió es la publicación: ya no reemplaza LIVE por el
+repo, así que no depende de conocer el contenido exacto de LIVE.
+
+Riesgo que queda abierto: estos scripts escriben `infra/redirect-www.js` sobre la función LIVE:
+
+- `infra/resenas-setup.sh` (`update-function`, línea ~361): es el setup de V1. Ejecutarlo quita el bloque admin y
+  cualquier regla LIVE que el repo no tenga.
+- `infra/setup.sh` (línea ~141): mismo efecto.
+- `infra/admin-setup.sh`: solo imprime el plan, pero el plan usa la misma fuente.
+
+No ejecutarlos hasta que `infra/redirect-www.js` sea igual a LIVE + bloque admin. Para reconciliar el repo hace falta
+el diff del diagnóstico de §16.9 (LIVE vs repo). Con ese diff, el repo recibe la lógica de LIVE primero y después
+el bloque admin, nunca al revés.
