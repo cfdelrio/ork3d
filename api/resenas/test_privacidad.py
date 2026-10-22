@@ -57,6 +57,24 @@ class LogsSanitizadosTest(unittest.TestCase):
         self.assertEqual(registro['error'], '[omitido]')
         self.assertEqual(registro['op'], 'aprobar')
 
+    def test_valor_con_forma_de_token_o_codigo_se_omite_en_cualquier_campo(self):
+        # Un código de login o un token (43 caracteres URL-safe) no es un identificador: no se loguea en ningún campo.
+        codigo = 'Ab3_dE5fGh7jK9mN2pQ4rS6tU8vW0xY1zA3bC5dE7fG9'
+        for campo in ('op', 'error', 'estado', 'resultado', 'review_id', 'ruta'):
+            with self.subTest(campo=campo):
+                registro = _registro.evento('ejemplo', **{campo: codigo})
+                self.assertEqual(registro[campo], '[omitido]')
+                self.assertNotIn(codigo, json.dumps(registro))
+
+    def test_identificadores_legitimos_siguen_pasando(self):
+        self.assertEqual(_registro.evento('ejemplo', review_id='c' * 32)['review_id'], 'c' * 32)
+        self.assertEqual(_registro.evento('ejemplo', error='ConditionalRequestConflict')['error'],
+                         'ConditionalRequestConflict')
+        self.assertEqual(_registro.evento('ejemplo', op='rechazar')['op'], 'rechazar')
+
+    def test_un_hash_completo_no_se_loguea(self):
+        self.assertEqual(_registro.evento('ejemplo', resultado='f' * 64)['resultado'], '[omitido]')
+
     def test_ruta_plantilla_oculta_ids_y_tokens(self):
         token = 'Qx7_mLp2vR9tZkW4aB8cD1eF3gH5jK6n'
         self.assertEqual(_registro.ruta_plantilla(f'/tokens/{token}'), '/tokens/{token}')

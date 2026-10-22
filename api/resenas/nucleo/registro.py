@@ -17,16 +17,23 @@ CAMPOS = frozenset({'review_id', 'op', 'status', 'estado', 'resultado', 'error',
 _VALOR = re.compile(r'[A-Za-z0-9_./:{}\-]{0,120}')
 _HEX32 = re.compile(r'[a-f0-9]{32}')
 _SECRETO = re.compile(r'[A-Za-z0-9_-]{20,}')
+# Forma de token, código de login o hash: 32 o más caracteres seguros para URL. El id de reseña (hex32) es la única
+# excepción. Se aplica a todos los campos, no solo a las rutas: un código pasado por error en "op" no se loguea.
+_FORMA_SECRETA = re.compile(r'[A-Za-z0-9_-]{32,}')
 
 
 def _ts():
     return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+def _forma_secreta(v):
+    return bool(_FORMA_SECRETA.fullmatch(v)) and not _HEX32.fullmatch(v)
+
+
 def _valor(v):
     if v is None or isinstance(v, (bool, int)):
         return v
-    if isinstance(v, str) and _VALOR.fullmatch(v):
+    if isinstance(v, str) and _VALOR.fullmatch(v) and not _forma_secreta(v):
         return v
     return '[omitido]'
 
