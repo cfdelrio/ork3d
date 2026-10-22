@@ -1,0 +1,9 @@
+# ORK3D · panel admin: estáticos del rediseño (commit 590ed7d). Única fuente para el diff, la publicación, la reversión y los tests.
+# Columnas: archivo local, clave en el bucket (igual al archivo), content-type, cache-control, rutas a invalidar (separadas por coma).
+# Debe ser exactamente la intersección entre git diff e8052cd..590ed7d y los estáticos del panel. admin-entrar.js no entra: no cambió.
+# Nada fuera de esta lista se sube. No incluye reseñas, export, fotos, API, Lambdas, IAM, CloudFront ni infra.
+admin-web/entrar.html	admin-web/entrar.html	text/html; charset=utf-8	no-store, max-age=0	/admin/entrar,/admin/entrar.html,/admin-web/entrar.html
+admin-web/resenas.html	admin-web/resenas.html	text/html; charset=utf-8	no-store, max-age=0	/admin/resenas,/admin/resenas/*,/admin/resenas.html,/admin-web/resenas.html
+assets/css/admin.css	assets/css/admin.css	text/css; charset=utf-8	no-store, max-age=0	/assets/css/admin.css
+assets/js/admin-comun.js	assets/js/admin-comun.js	application/javascript; charset=utf-8	no-store, max-age=0	/assets/js/admin-comun.js
+assets/js/admin-panel.js	assets/js/admin-panel.js	application/javascript; charset=utf-8	no-store, max-age=0	/assets/js/admin-panel.js
