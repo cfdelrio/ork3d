@@ -606,3 +606,52 @@ Smoke: el CHECKPOINT 6B espera `400` y sigue sin enviar correo. El CHECKPOINT 6 
 Despliegue: `api/resenas/admin_app.py` y `nucleo/sesion.py` cambian, así que el `CodeSha256` del paquete cambia. El
 próximo deploy necesita `ALLOW_ADMIN_CODE_UPDATE=1` (§16.6). La configuración de CloudFront coincide y no se vuelve a
 llamar a `UpdateDistribution`.
+
+### 16.9 Publicación del panel (infra/admin-frontend-deploy.sh)
+
+Escribe solo cinco claves del bucket `ork3d.com`: `admin-web/entrar.html`, `admin-web/resenas.html`,
+`assets/js/admin-comun.js`, `assets/js/admin-entrar.js` y `assets/js/admin-panel.js`. Cada una con
+`Cache-Control: no-store, max-age=0`. Las páginas llevan `noindex, nofollow` en el propio HTML.
+
+- Función `ork3d-redirect-www` (la que reescribe `/admin/entrar` y `/admin/resenas`): el código LIVE se compara con
+  `infra/redirect-www.js` (`admin_frontend_ayuda.py funcion`):
+  - `IGUAL`: no se escribe nada.
+  - `ACTUALIZAR`: LIVE es el repo sin el bloque admin. Se publica el repo (update-function y publish-function).
+  - `DISTINTO`: otro cambio en el sitio público. El script sale con 4 y no escribe.
+- Rollback antes de cualquier escritura: código LIVE de la función, su metadata y cada página que ya existía
+  (en `ADMIN_DEPLOY_RUTA/rollback`, 600). Una página sin copia previa es una página nueva.
+- Invalidación solo de `/admin/entrar`, `/admin/resenas`, `/admin/resenas/*`, `/admin-web/*` y `/assets/js/admin-*`.
+- Smoke de solo lectura: cada página devuelve el mismo SHA-256 que el repo y `no-store`; `/admin/api/sesion` responde
+  401 de la API; `/` responde 200.
+
+No hace: no sincroniza el sitio (no usa `deploy.sh`), no toca `/opinar`, `/opiniones` ni el resto de `assets/`, no
+cambia la política del bucket, no envía correos.
+
+No verifica: la consola del navegador ni el inicio de sesión. Eso queda para el acceso humano con el enlace del correo.
+
+### 16.10 Secuencia de despliegue en EC2 (un solo correo)
+
+Se ejecuta en este orden. Ninguna ejecución envía correo salvo la última, y esa lo envía una sola vez.
+
+```bash
+cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
+  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr
+
+# 1. Código de la Lambda admin (CSRF 400) y smoke 401 y 400. Sin correo.
+ALLOW_ADMIN_DEPLOY=1 ALLOW_ADMIN_CODE_UPDATE=1 infra/admin-deploy.sh 2>&1 | tee /tmp/ork3d-v2-deploy/paso1.log
+
+# 2. Panel, JS y función de /admin/entrar y /admin/resenas.
+ALLOW_ADMIN_FRONTEND=1 infra/admin-frontend-deploy.sh 2>&1 | tee /tmp/ork3d-v2-deploy/paso2.log
+
+# 3. Un solo correo de acceso. El resto del deploy se repite sin cambios.
+ALLOW_ADMIN_DEPLOY=1 ALLOW_ADMIN_MAGIC_EMAIL=1 infra/admin-deploy.sh 2>&1 | tee /tmp/ork3d-v2-deploy/paso3.log
+```
+
+Criterios de cada paso:
+
+- Paso 1: `CHECKPOINT 6` (401), `CHECKPOINT 6B` (400 sin correo) y "Smoke positivo de magic email omitido".
+- Paso 2: `CHECKPOINT F2` y `CHECKPOINT F3`.
+- Paso 3: `CHECKPOINT 7` (202). El 202 y SES confirman el envío. La recepción la confirma una persona en la bandeja.
+
+El límite humano está al final: abrir el enlace `…/admin/entrar#c=…` del correo. El código no se copia a ningún
+registro. Si el enlace no sirve, el acceso no se resuelve automáticamente.

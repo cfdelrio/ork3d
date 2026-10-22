@@ -31,7 +31,7 @@ SENTINELA = 'VALOR-SENTINELA-ADMIN-DEPLOY-5522'
 FROM = 'remitente-prueba@ejemplo.test'
 ADMIN = 'moderacion-prueba@ejemplo.test'
 BASICA = 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
-BOOLEANAS = {'invoked-via-function-url'}
+BOOLEANAS = {'invoked-via-function-url', 'only-show-errors'}
 MUTANTES = ('create', 'put', 'attach', 'add-permission', 'update', 'delete')
 ENV_PUBLICA = {'RESENAS_BUCKET': BUCKET, 'ALLOWED_ORIGIN': 'https://ork3d.com',
                'GOOGLE_REVIEW_URL': 'https://g.page/r/' + SENTINELA}
@@ -392,8 +392,44 @@ def despachar(svc, op, o, pos, st):
         return {'Distribution': {'Id': DIST, 'Status': 'InProgress'}, 'ETag': st['dist']['etag']}
 
     if (svc, op) == ('cloudfront', 'describe-function'):
+        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionMetadata': {'Stage': 'LIVE'},
+                                    'FunctionConfig': {'Comment': 'ORK3D redirects', 'Runtime': 'cloudfront-js-2.0'}},
+                'ETag': st['fn']['etag']}
+
+    if (svc, op) == ('cloudfront', 'update-function'):
+        if o.get('if-match') != st['fn']['etag']:
+            raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid', op)
+        st['fn']['draft'] = leer_archivo(o['function-code'], binario=True).decode('utf-8')
+        st['fn']['etag'] = 'E-DRAFT-' + str(len(st['fn']['draft']))
+        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionConfig': {'Comment': 'ORK3D redirects',
+                                                                                'Runtime': 'cloudfront-js-2.0'}},
+                'ETag': st['fn']['etag']}
+
+    if (svc, op) == ('cloudfront', 'publish-function'):
+        if o.get('if-match') != st['fn']['etag'] or 'draft' not in st['fn']:
+            raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid', op)
+        st['fn']['codigo'] = st['fn']['draft']
+        st['fn']['etag'] = 'E-LIVE-' + str(len(st['fn']['codigo']))
         return {'FunctionSummary': {'Name': o.get('name'), 'FunctionMetadata': {'Stage': 'LIVE'}},
                 'ETag': st['fn']['etag']}
+
+    if (svc, op) == ('cloudfront', 'create-invalidation'):
+        lote = json.loads(leer_archivo(o['invalidation-batch']))
+        st.setdefault('invalidaciones', []).append(lote['Paths']['Items'])
+        return {'Invalidation': {'Id': 'FAKEINV' + str(len(st['invalidaciones'])), 'Status': 'InProgress'}}
+
+    if (svc, op) == ('s3', 'cp'):
+        origen, destino = pos[0], pos[1]
+        if destino.startswith('s3://'):
+            clave = destino.split('/', 3)[3]
+            st.setdefault('sitio', {})[clave] = leer_archivo(origen)
+            return None
+        clave = origen.split('/', 3)[3]
+        if clave not in st.get('sitio', {}):
+            raise Fallo('404', 'Not Found', op)
+        with open(destino, 'w', encoding='utf-8') as f:
+            f.write(st['sitio'][clave])
+        return None
 
     if (svc, op) == ('cloudfront', 'get-function'):
         if pos:

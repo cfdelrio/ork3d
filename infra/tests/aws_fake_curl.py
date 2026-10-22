@@ -102,6 +102,26 @@ def respuesta_de_la_api(ruta, metodo, cabeceras, cuerpo):
     return None
 
 
+MAPA_SITIO = {'/': 'index.html', '/opiniones': 'opiniones.html', '/admin/entrar': 'admin-web/entrar.html',
+              '/admin/resenas': 'admin-web/resenas.html'}
+
+
+def respuesta_del_sitio(ruta):
+    """Página del sitio servida desde FAKE_SITIO_DIR (copia de lo publicado). None si la ruta no es del sitio."""
+    carpeta = os.environ.get('FAKE_SITIO_DIR', '')
+    if not carpeta or not (ruta in MAPA_SITIO or ruta.startswith('/assets/js/')):
+        return None
+    relativa = MAPA_SITIO.get(ruta, ruta.lstrip('/'))
+    origen = os.path.join(carpeta, relativa)
+    if not os.path.isfile(origen):
+        return '404', b'<html>pagina no encontrada</html>', {'content-type': 'text/html', 'x-cache': 'Error from cloudfront'}
+    with open(origen, 'rb') as f:
+        contenido = f.read()
+    cache = 'no-store, max-age=0' if relativa.startswith(('admin-web/', 'assets/js/admin')) else 'max-age=60'
+    return '200', contenido, {'content-type': 'text/html; charset=utf-8', 'cache-control': cache,
+                              'x-cache': 'Miss from cloudfront'}
+
+
 def main():
     salida, cabeceras_salida, formato, metodo, url = leer_argumentos(sys.argv[1:])
     if 'fake-code.example' in url:
@@ -121,8 +141,13 @@ def main():
         with open(os.environ['FAKE_LOG'], 'a', encoding='utf-8') as f:
             f.write(f'curl {metodo} {ruta}\n')
 
-    api = respuesta_de_la_api(ruta, metodo, cabeceras, cuerpo)
-    if api is None:
+    cuerpo_bytes = None
+    sitio = respuesta_del_sitio(ruta) if metodo == 'GET' else None
+    api = None if sitio is not None else respuesta_de_la_api(ruta, metodo, cabeceras, cuerpo)
+    if sitio is not None:
+        codigo, cuerpo_bytes, cabeceras_resp = sitio
+        cuerpo_resp, valido = '', False
+    elif api is None:
         codigo, cuerpo_resp, valido = '404', CUERPO_404_SITIO, False
         cabeceras_resp = {'content-type': 'text/html; charset=utf-8', 'server': 'AmazonS3',
                           'x-cache': 'Error from cloudfront'}
@@ -143,8 +168,8 @@ def main():
                                 'cuerpo': None if cuerpo is None else cuerpo.decode('utf-8'),
                                 'valido': valido}, ensure_ascii=False) + '\n')
     if salida:
-        with open(salida, 'w', encoding='utf-8') as f:
-            f.write(cuerpo_resp)
+        with open(salida, 'wb') as f:
+            f.write(cuerpo_bytes if cuerpo_bytes is not None else cuerpo_resp.encode('utf-8'))
     if cabeceras_salida:
         with open(cabeceras_salida, 'w', encoding='utf-8') as f:
             f.write(f'HTTP/2 {codigo}\r\n')
