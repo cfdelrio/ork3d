@@ -335,6 +335,15 @@ def despachar(svc, op, o, pos, st):
                 grupos.append(grupo)
         return {'logGroups': grupos}
 
+    if (svc, op) == ('logs', 'filter-log-events'):
+        # Una línea REPORT por invocación: la escribe el simulador de curl (FAKE_INVOCACIONES) cuando la API responde.
+        ruta_marcas = os.environ.get('FAKE_INVOCACIONES', '')
+        marcas = []
+        if ruta_marcas and os.path.exists(ruta_marcas):
+            with open(ruta_marcas, encoding='utf-8') as f:
+                marcas = [int(linea) for linea in f if linea.strip()]
+        return {'events': [{'timestamp': m, 'message': 'REPORT RequestId: fake', 'eventId': str(m)} for m in marcas]}
+
     if (svc, op) == ('logs', 'create-log-group'):
         nombre = o.get('log-group-name')
         if nombre in st['logs']:

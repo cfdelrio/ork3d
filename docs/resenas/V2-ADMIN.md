@@ -549,3 +549,34 @@ una función cuyo estado no se pudo confirmar.
 
 El zip del repo hoy tiene el `CodeSha256` que empieza con `FggkLhdVTANU…` (verificado con `zip`, sin AWS). Este
 fix no cambia `admin_app.py` ni `nucleo/`, así que el próximo deploy no actualiza el código.
+
+### 16.7 404 observado en EC2 (diagnóstico y decisión pendiente)
+
+Captura de EC2 (22/10/2026, 02:40 UTC), sin cookie y sin `Origin`:
+
+| Petición | Respuesta | Lectura |
+|---|---|---|
+| `GET /admin/api/sesion` | 401 de la API (`no_autenticado`) | La API responde y CloudFront no la reescribe |
+| `POST /admin/api/sesion/solicitar` sin `Origin` | 404 con la página de error del sitio (`server: AmazonS3`, `x-cache: Error from cloudfront`) | La API responde 403 (CSRF) y el borde lo reemplaza |
+
+Causa probable (hipótesis fuerte, no confirmada en AWS): `infra/setup.sh` define `CustomErrorResponses` en la
+distribución para 403 → 404 `/error.html` y 404 → 404 `/error.html`. Es una configuración de toda la distribución,
+no de un behavior, así que también afecta a `/admin/api/*`. El router responde 403 correctamente (tests de §16.5).
+Un 401 no está en la lista y por eso pasa íntegro.
+
+Para confirmarlo sin escribir en AWS: `ALLOW_ADMIN_DIAGNOSTICO=1 infra/admin-diagnostico.sh` (solo lectura, cuatro
+peticiones sin efectos). Si concluye `MAPEO_ERRORES_PERSONALIZADOS`, la Lambda sí recibió el POST y el borde reescribió
+la respuesta. Otras conclusiones posibles están en `infra/admin_diagnostico_ayuda.py` (`decidir`).
+
+Decisión pendiente (no se toma en código porque cambia el contrato o la web pública):
+
+1. Dejar de mapear 403 en la distribución. Requiere que el OAC pueda listar el bucket (`s3:ListBucket`) para que los
+   faltantes sigan dando 404 real. Afecta la web pública: verificar antes y después `/opinar`, `/opiniones` y
+   `error.html`. Es la opción preferida si el bucket ya concede `ListBucket`.
+2. Cambiar el status de los rechazos CSRF a un código que no se reescribe. Cambia el contrato y el criterio del
+   CHECKPOINT 6B del smoke, así que requiere aprobación explícita.
+3. Servir la API desde otro host sin errores personalizados. Requiere DNS, fuera de alcance sin confirmación.
+
+Mientras tanto, el POST válido con `Origin` no pasa por el mapeo (202 no está en la lista): el criterio 3 de V2 no
+depende de la decisión. Sí quedan bloqueados el CHECKPOINT 6B del smoke y cualquier rechazo que el frontend deba
+leer como JSON. Ningún rechazo llega a SES, así que la decisión no cambia la seguridad del login.
