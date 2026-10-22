@@ -33,6 +33,8 @@ capa "CLI de moderación (admin/tests)" bash admin/tests/run_tests.sh
 capa "Browser E2E /opinar (Chromium)" node dev/e2e/opinar.e2e.js
 capa "Browser E2E panel admin (Chromium)" node dev/e2e/admin.e2e.js
 capa "Browser E2E moderación admin: lectura sin mutar y doble clic (Chromium)" node dev/e2e/admin-moderacion.e2e.js
+capa "Browser E2E UX del panel admin: desborde, objetivos de 44 px, contraste, foco y diálogo (Chromium)" node dev/e2e/admin-ux.e2e.js
+capa "Browser capturas del panel admin: sin errores de página en los estados visuales (Chromium)" env PREFIJO=suite node dev/e2e/admin-visual.e2e.js
 capa "Browser E2E /opiniones: estados, SEO, móvil, accesibilidad y contraste (Chromium)" node dev/e2e/opiniones.e2e.js
 capa "Validaciones HTML/JS/shell/JSON/IAM" python3 dev/validar.py
 

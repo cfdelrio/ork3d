@@ -9,7 +9,7 @@
 
   var ESTADOS = {
     pending: { texto: 'Pendiente', clase: 'pildora--pendiente' },
-    approved: { texto: 'Aprobada', clase: 'pildora--aprobada' },
+    approved: { texto: 'Publicada', clase: 'pildora--aprobada' },
     rejected: { texto: 'Rechazada', clase: 'pildora--rechazada' },
     hidden: { texto: 'Oculta', clase: 'pildora--oculta' }
   };

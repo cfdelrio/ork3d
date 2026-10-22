@@ -635,7 +635,7 @@ caso('moderación: aprobar y ocultar piden confirmación; restaurar no; el aviso
     await botonAccion('aprobar').click();
     await p.click('#dialogo-confirmar');
     await p.locator('#aviso-detalle').filter({ hasText: 'Reseña aprobada.' }).waitFor({ state: 'visible', timeout: 8000 });
-    esperar((await p.locator('#detalle .pildora').textContent()).trim() === 'Aprobada', 'la píldora debe decir Aprobada');
+    esperar((await p.locator('#detalle .pildora').textContent()).trim() === 'Publicada', 'la píldora debe decir Publicada');
     esperar(await botonAccion('ocultar').isVisible(), 'una reseña aprobada ofrece Ocultar');
     const post = pedidosA(s, 'POST', `/resenas/${resenas.A}/aprobar`)[0];
     await post.listo;
@@ -651,7 +651,7 @@ caso('moderación: aprobar y ocultar piden confirmación; restaurar no; el aviso
     await botonAccion('restaurar').click();
     esperar((await p.locator('#dialogo[open]').count()) === 0, 'restaurar no pide confirmación');
     await p.locator('#aviso-detalle').filter({ hasText: 'Reseña restaurada.' }).waitFor({ state: 'visible', timeout: 8000 });
-    esperar((await p.locator('#detalle .pildora').textContent()).trim() === 'Aprobada', 'una reseña restaurada queda aprobada');
+    esperar((await p.locator('#detalle .pildora').textContent()).trim() === 'Publicada', 'una reseña restaurada queda publicada');
     sinErroresNiExternos(s);
   } finally {
     await s.ctx.close();

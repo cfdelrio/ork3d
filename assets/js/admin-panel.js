@@ -37,7 +37,24 @@
     confirmacion: null,
     turnoConfirmacion: 0,
     pestana: 'pending',
-    solicitudBandeja: 0
+    solicitudBandeja: 0,
+    solicitudTotales: 0
+  };
+
+  // Nombre de cada sección en la cabecera (presentación).
+  var SECCION_TEXTO = {
+    'seccion-acceso': 'Acceso',
+    'seccion-panel': 'Bandeja de reseñas',
+    'seccion-detalle': 'Reseña'
+  };
+
+  // Textos de estado vacío por pestaña: explican qué pasa a continuación, no solo que no hay nada.
+  var VACIO = {
+    pending: ['No hay reseñas pendientes', 'Cuando un cliente envíe su opinión, aparece acá para revisarla.'],
+    approved: ['Todavía no hay reseñas publicadas', 'Cuando aprobás una reseña pendiente, se ve en el sitio y aparece acá.'],
+    hidden: ['No hay reseñas ocultas', 'Una reseña oculta sale del sitio, pero queda acá por si hay que restaurarla.'],
+    rejected: ['No hay reseñas rechazadas', 'Las reseñas que no se publican quedan acá.'],
+    all: ['Todavía no hay reseñas', 'Cuando lleguen opiniones de clientes, van a aparecer acá.']
   };
 
   var CAMPOS_FORM = [
@@ -54,6 +71,7 @@
     ['seccion-acceso', 'seccion-panel', 'seccion-detalle'].forEach(function (id) {
       $(id).hidden = $(id) !== seccion;
     });
+    $('seccion-actual').textContent = SECCION_TEXTO[seccion.id] || 'Administración de reseñas';
     $('principal').focus();
   }
 
@@ -72,17 +90,20 @@
   function mostrarAcceso(mensaje, tipo) {
     mostrar($('seccion-acceso'));
     $('cerrar-sesion').hidden = true;
+    $('estado-sesion').hidden = true;
     A.avisar($('aviso-global'), mensaje || '', tipo || 'aviso');
     $('pedir-acceso').disabled = false;
   }
 
   function entrar() {
     $('cerrar-sesion').hidden = false;
+    $('estado-sesion').hidden = false;
     A.avisar($('aviso-global'), '', '');
     if (ID_DETALLE) {
       cargarDetalle(ID_DETALLE);
     } else {
       mostrar($('seccion-panel'));
+      cargarTotales();
       cargarBandeja();
     }
   }
@@ -325,6 +346,45 @@
     });
   });
 
+  // ── Totales ─────────────────────────────────────────────────────────────
+
+  // Cuenta por estado sobre la lectura de todas las reseñas (estado=all). Sin endpoint nuevo.
+  function pintarTotales(items) {
+    var cuenta = { pending: 0, approved: 0, hidden: 0, rejected: 0 };
+    items.forEach(function (r) {
+      if (Object.prototype.hasOwnProperty.call(cuenta, r.status)) {
+        cuenta[r.status] += 1;
+      }
+    });
+    $('total-pendientes').textContent = String(cuenta.pending);
+    $('total-publicadas').textContent = String(cuenta.approved);
+    $('total-ocultas').textContent = String(cuenta.hidden);
+    $('total-rechazadas').textContent = String(cuenta.rejected);
+  }
+
+  function cargarTotales() {
+    var solicitud = ++ui.solicitudTotales;
+    return A.llamar('GET', '/resenas?estado=all').then(function (r) {
+      if (solicitud !== ui.solicitudTotales) {
+        return;
+      }
+      if (r.status === 401) {
+        mostrarAcceso(MSG_SESION, 'aviso');
+        return;
+      }
+      if (r.status !== 200) {
+        throw new Error('estado ' + r.status);
+      }
+      pintarTotales((r.datos && r.datos.resenas) || []);
+      A.avisar($('aviso-totales'), '', '');
+    }).catch(function () {
+      if (solicitud !== ui.solicitudTotales) {
+        return;
+      }
+      A.avisar($('aviso-totales'), 'No pudimos actualizar los totales. La bandeja sigue funcionando.', 'error');
+    });
+  }
+
   // ── Bandeja ─────────────────────────────────────────────────────────────
 
   function activarPestana(boton, enfocar) {
@@ -386,25 +446,45 @@
     return '';
   }
 
+  // Datos de la reseña en una línea, y las señales (foto, pedido, aviso) como etiquetas.
+  function avisoCorto(aviso) {
+    if (aviso === 'enviado') {
+      return 'Aviso enviado';
+    }
+    if (aviso === 'pendiente') {
+      return 'Aviso pendiente';
+    }
+    return '';
+  }
+
   function tarjeta(r) {
     var nombre = r.display_name || 'Cliente de ORK3D';
     var item = A.crear('li');
     var art = A.crear('article', { 'class': 'tarjeta', 'aria-labelledby': 'nombre-' + r.id });
 
     var cab = A.crear('div', { 'class': 'tarjeta__cab' });
-    cab.appendChild(A.estrellas(r.rating));
     cab.appendChild(pildoraEstado(r.status));
+    cab.appendChild(A.estrellas(r.rating));
     art.appendChild(cab);
 
     art.appendChild(A.crear('h3', { 'class': 'tarjeta__nombre', id: 'nombre-' + r.id }, nombre));
-    art.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Producto: ' + (r.product_label || '—')));
-    art.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Categoría: ' + (r.category || '—')));
-    art.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Recibida: ' + (A.fecha(r.created_at) || '—')));
-    var foto = 'Foto: ' + (r.tiene_foto ? 'sí' : 'no') + (r.verified ? ' · Verificada' : '');
-    art.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, foto));
-    if (avisoTexto(r.aviso)) {
-      art.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, avisoTexto(r.aviso)));
+
+    var datos = [r.product_label || 'Sin nombre de producto', r.category || 'sin categoría',
+      'recibida ' + (A.fecha(r.created_at) || 'sin fecha')];
+    art.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, datos.join(' · ')));
+
+    var senales = [r.tiene_foto ? 'Con foto' : 'Sin foto'];
+    if (r.verified) {
+      senales.push('Pedido verificado');
     }
+    if (avisoCorto(r.aviso)) {
+      senales.push(avisoCorto(r.aviso));
+    }
+    var chips = A.crear('ul', { 'class': 'tarjeta__chips', 'aria-label': 'Datos de la reseña' });
+    senales.forEach(function (texto) {
+      chips.appendChild(A.crear('li', null, texto));
+    });
+    art.appendChild(chips);
 
     var ver = A.crear('a', { 'class': 'btn btn--secundario', href: '/admin/resenas/' + encodeURIComponent(r.id) }, 'Ver');
     ver.appendChild(A.crear('span', { 'class': 'sr-only' }, ' la reseña de ' + nombre));
@@ -419,7 +499,12 @@
     A.vaciar(lista);
     A.avisar($('aviso-bandeja'), '', '');
     if (!items.length) {
-      lista.appendChild(A.crear('li', { 'class': 'lista__vacia' }, 'No hay reseñas en este estado.'));
+      var vacio = A.crear('li', { 'class': 'lista__vacia' });
+      var caja = A.crear('div', { 'class': 'vacio' });
+      caja.appendChild(A.crear('p', { 'class': 'vacio__titulo' }, VACIO[ui.pestana] ? VACIO[ui.pestana][0] : VACIO.all[0]));
+      caja.appendChild(A.crear('p', { 'class': 'vacio__texto' }, VACIO[ui.pestana] ? VACIO[ui.pestana][1] : VACIO.all[1]));
+      vacio.appendChild(caja);
+      lista.appendChild(vacio);
       return;
     }
     items.forEach(function (r) {
@@ -427,10 +512,19 @@
     });
   }
 
+  // Mientras carga, tres bloques de contenido: la pantalla no queda en blanco ni salta al llegar la lista.
+  function pintarEsqueleto() {
+    var lista = $('lista');
+    A.vaciar(lista);
+    for (var i = 0; i < 3; i++) {
+      lista.appendChild(A.crear('li', { 'class': 'esqueleto', 'aria-hidden': 'true' }));
+    }
+  }
+
   function cargarBandeja() {
     var solicitud = ++ui.solicitudBandeja;
     var lista = $('lista');
-    A.vaciar(lista);
+    pintarEsqueleto();
     lista.setAttribute('aria-busy', 'true');
     $('reintentar-bandeja').hidden = true;
     A.avisar($('aviso-bandeja'), 'Cargando reseñas…', 'aviso');
@@ -473,29 +567,49 @@
     return A.crear('p', { 'class': 'detalle__etiqueta' }, texto);
   }
 
-  function bloqueResumen(r) {
+  // Fila superior: estado y fecha de recepción. Es lo primero que se lee.
+  function filaEstado(r) {
+    var fila = A.crear('div', { 'class': 'detalle__fila' });
+    fila.appendChild(pildoraEstado(r.status));
+    fila.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Recibida ' + (A.fecha(r.created_at) || 'sin fecha')));
+    return fila;
+  }
+
+  // Lo que ve el cliente: estrellas, producto y categoría.
+  function bloqueIdentidad(r) {
     var b = bloque();
-    var fila = A.crear('div', { 'class': 'tarjeta__cab' });
     var estrellasGrandes = A.estrellas(r.rating);
     estrellasGrandes.classList.add('estrellas--detalle');
-    fila.appendChild(estrellasGrandes);
-    fila.appendChild(pildoraEstado(r.status));
-    b.appendChild(fila);
+    b.appendChild(estrellasGrandes);
     b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' },
-      'Producto: ' + (r.product_label || '—') + ' · Categoría: ' + (r.category || '—')));
-    b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Recibida: ' + (A.fecha(r.created_at) || '—')));
-    if (r.moderated_at) {
-      b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Última moderación: ' + A.fecha(r.moderated_at)));
-    }
+      (r.product_label || 'Sin nombre de producto') + ' · ' + (r.category || 'sin categoría')));
+    return b;
+  }
+
+  // Solo equipo: fechas de moderación, aviso y permisos. Nada de esto sale del panel.
+  function bloqueModeracion(r) {
+    var b = bloque();
+    b.appendChild(etiqueta('Moderación'));
+    b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Última moderación: ' + (A.fecha(r.moderated_at) || 'todavía no')));
     if (r.published_at) {
-      b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Publicada: ' + A.fecha(r.published_at)));
+      b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, 'Publicada el ' + A.fecha(r.published_at)));
     }
     if (avisoTexto(r.aviso)) {
       b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' }, avisoTexto(r.aviso)));
     }
     b.appendChild(A.crear('p', { 'class': 'tarjeta__meta' },
-      'Autorizó la publicación: ' + (r.permission_to_publish ? 'sí' : 'no') + (r.verified ? ' · Verificada' : '')));
+      'Autorizó la publicación: ' + (r.permission_to_publish ? 'sí' : 'no') + (r.verified ? ' · pedido verificado' : '')));
     return b;
+  }
+
+  // Zona con título y nota. El título va en h2: el h1 es la reseña.
+  function zona(clase, titulo, nota) {
+    var z = A.crear('section', { 'class': 'zona ' + clase, 'aria-label': titulo });
+    z.appendChild(A.crear('h2', { 'class': 'zona__titulo' }, titulo));
+    if (nota) {
+      z.appendChild(A.crear('p', { 'class': 'zona__nota' }, nota));
+    }
+    return z;
   }
 
   function bloqueFoto(r) {
@@ -547,7 +661,7 @@
 
   function bloqueInterno(r) {
     var b = bloque();
-    b.appendChild(etiqueta('Feedback privado (solo para el equipo)'));
+    b.appendChild(etiqueta('Feedback privado'));
     b.appendChild(A.crear('p', { 'class': 'detalle__texto' }, r.private_feedback || 'Sin feedback privado.'));
     b.appendChild(etiqueta('Pedido interno'));
     b.appendChild(A.crear('p', { 'class': 'detalle__texto' }, r.pedido || 'Sin referencia de pedido.'));
@@ -574,11 +688,11 @@
       });
     } else if (r.status === 'approved') {
       acciones.push({
-        accion: 'ocultar', texto: 'Ocultar', clase: 'btn--secundario', confirmar: true,
+        accion: 'ocultar', texto: 'Ocultar', clase: 'btn--secundario', confirmar: true, peligro: true,
         titulo: '¿Ocultar esta reseña?', detalle: 'Sale del sitio y se borra su foto pública. La foto privada se conserva.'
       });
       acciones.push({
-        accion: 'rechazar', texto: 'Rechazar', clase: 'btn--peligro', confirmar: true,
+        accion: 'rechazar', texto: 'Rechazar', clase: 'btn--peligro', confirmar: true, peligro: true,
         titulo: '¿Rechazar esta reseña publicada?', detalle: 'Sale del sitio y se borra su foto pública.'
       });
     } else if (r.status === 'hidden') {
@@ -613,7 +727,7 @@
         if (a.confirmar) {
           abrirConfirmacion(a.titulo, a.detalle, function () {
             ejecutarAccion(r.id, a);
-          });
+          }, a.peligro);
         } else {
           ejecutarAccion(r.id, a);
         }
@@ -626,11 +740,22 @@
     $('titulo-detalle').textContent = 'Reseña de ' + (r.display_name || 'Cliente de ORK3D');
     var d = $('detalle');
     A.vaciar(d);
-    d.appendChild(bloqueResumen(r));
-    d.appendChild(bloqueFoto(r));
-    d.appendChild(bloqueComentario(r));
-    d.appendChild(bloqueAspectos(r));
-    d.appendChild(bloqueInterno(r));
+    d.appendChild(filaEstado(r));
+
+    var cliente = zona('zona--cliente', 'Lo que ve el cliente',
+      'Así se vería en el sitio si la publicás.');
+    cliente.appendChild(bloqueIdentidad(r));
+    cliente.appendChild(bloqueFoto(r));
+    cliente.appendChild(bloqueComentario(r));
+    cliente.appendChild(bloqueAspectos(r));
+
+    var interna = zona('zona--interna', 'Información interna',
+      'Solo para el equipo. Nunca se publica.');
+    interna.appendChild(bloqueModeracion(r));
+    interna.appendChild(bloqueInterno(r));
+
+    d.appendChild(cliente);
+    d.appendChild(interna);
     pintarAcciones(r);
     $('titulo-detalle').focus();
   }
@@ -667,18 +792,22 @@
 
   // ── Confirmación (diálogo nativo) ───────────────────────────────────────
 
-  function abrirConfirmacion(titulo, detalle, alConfirmar) {
+  function abrirConfirmacion(titulo, detalle, alConfirmar, peligro) {
     $('dialogo-titulo').textContent = titulo;
     $('dialogo-texto').textContent = detalle || '';
     ui.confirmacion = alConfirmar;
     // Confirmar queda deshabilitado un instante. Cada apertura invalida el temporizador de la anterior.
     var confirmar = $('dialogo-confirmar');
+    var espera = $('dialogo-espera');
+    confirmar.className = 'btn ' + (peligro ? 'btn--peligro' : 'btn--primario');
     confirmar.disabled = true;
+    espera.hidden = false;
     ui.turnoConfirmacion += 1;
     var turno = ui.turnoConfirmacion;
     window.setTimeout(function () {
       if (turno === ui.turnoConfirmacion) {
         confirmar.disabled = false;
+        espera.hidden = true;
       }
     }, ESPERA_CONFIRMAR_MS);
     var dialogo = $('dialogo');
@@ -719,12 +848,36 @@
     ui.confirmacion = null;
   });
 
+  // Tab no sale del diálogo: con Confirmar deshabilitado, Cancelar es el único control y el navegador
+  // mandaría el foco a la barra del navegador. Se vuelve al primer o al último control habilitado.
+  $('dialogo').addEventListener('keydown', function (evento) {
+    if (evento.key !== 'Tab') {
+      return;
+    }
+    var dialogo = $('dialogo');
+    var habilitados = Array.prototype.slice.call(dialogo.querySelectorAll('button:not([disabled])'));
+    var primero = habilitados[0];
+    var ultimo = habilitados[habilitados.length - 1];
+    var activo = document.activeElement;
+    var fueraDelDialogo = !dialogo.contains(activo);
+    if (evento.shiftKey && (activo === primero || fueraDelDialogo)) {
+      evento.preventDefault();
+      ultimo.focus();
+    } else if (!evento.shiftKey && (activo === ultimo || fueraDelDialogo)) {
+      evento.preventDefault();
+      primero.focus();
+    }
+  });
+
   // ── Acciones de moderación ──────────────────────────────────────────────
 
   function resolverAccion(id, a, r) {
     if (r.status === 401) {
       mostrarAcceso(MSG_SESION, 'aviso');
       return null;
+    }
+    if (r.status === 200 || r.status === 202) {
+      cargarTotales();
     }
     if (r.status === 200) {
       if (r.datos && r.datos.export === 'pendiente') {

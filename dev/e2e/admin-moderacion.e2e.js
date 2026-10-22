@@ -21,7 +21,8 @@ const PORT = Number(process.env.PORT || 8797);
 const BASE = `http://127.0.0.1:${PORT}`;
 const CHROME = process.env.CHROME_PATH
   || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
-// Geometría donde el 2.º clic de un doble click sobre "Aprobar" cae en "Confirmar" (medido en el barrido de §17).
+// Viewport de teléfono para el caso del doble clic. Desde el rediseño del panel (acciones arriba, diálogo centrado)
+// ningún tamaño probado (320–1280 × 480–800) deja "Confirmar" bajo el punto de "Aprobar": el caso fuerza el 2.º clic.
 const ANCHO_RIESGO = 390;
 const ALTO_RIESGO = 480;
 
@@ -233,14 +234,14 @@ caso('aprobar: un clic explícito en Confirmar envía exactamente una vez', asyn
     await p.click('#dialogo-confirmar');
     await p.locator('#aviso-detalle').filter({ hasText: 'Reseña aprobada.' }).waitFor({ state: 'visible', timeout: 8000 });
     esperar(postsDe(s, 'aprobar').length === 1, `debe haber un solo POST de aprobar, hubo ${postsDe(s, 'aprobar').length}`);
-    esperar((await p.locator('#detalle .pildora').textContent()).trim() === 'Aprobada', 'la píldora debe decir Aprobada');
+    esperar((await p.locator('#detalle .pildora').textContent()).trim() === 'Publicada', 'la píldora debe decir Publicada');
     esperar(s.errores.length === 0, `errores de página: ${s.errores.join(' | ')}`);
   } finally {
     await s.ctx.close();
   }
 });
 
-caso('aprobar: doble clic sobre "Aprobar" en la geometría de riesgo no aprueba; el diálogo queda abierto', async (browser) => {
+caso('aprobar: el 2.º clic de un doble clic sobre "Aprobar", si cae en "Confirmar", no aprueba; el diálogo queda abierto', async (browser) => {
   const s = await abrirPagina(browser, { ancho: ANCHO_RIESGO, alto: ALTO_RIESGO });
   try {
     const p = s.page;
@@ -248,14 +249,16 @@ caso('aprobar: doble clic sobre "Aprobar" en la geometría de riesgo no aprueba;
     const punto = await centro(boton(p, 'aprobar'));
     await p.mouse.click(punto.x, punto.y);                 // clic 1: abre el diálogo
     await p.locator('#dialogo[open]').waitFor({ state: 'visible' });
-    // Precondición: bajo el puntero queda "Confirmar". Sin esto, la prueba no mediría el riesgo.
+    // El 2.º clic va sobre "Confirmar", que es el riesgo que se prueba. Precondición: ahí hay realmente "Confirmar".
+    const destino = await centro(p.locator('#dialogo-confirmar'));
     const bajoElPuntero = await p.evaluate(([x, y]) => {
       const confirmar = document.getElementById('dialogo-confirmar');
       const e = document.elementFromPoint(x, y);
       return !!e && (e === confirmar || confirmar.contains(e));
-    }, [punto.x, punto.y]);
-    esperar(bajoElPuntero, 'precondición: en esta geometría el 2.º clic cae en Confirmar');
-    await p.mouse.down({ clickCount: 2 });                 // clic 2 del doble clic, sobre el mismo punto
+    }, [destino.x, destino.y]);
+    esperar(bajoElPuntero, 'precondición: el 2.º clic debe caer en Confirmar');
+    await p.mouse.move(destino.x, destino.y);
+    await p.mouse.down({ clickCount: 2 });                 // clic 2 del doble clic, sobre Confirmar
     await p.mouse.up({ clickCount: 2 });
     await p.waitForTimeout(1200);
     esperar(postsDe(s, 'aprobar').length === 0, 'un doble clic sobre Aprobar no puede aprobar la reseña');
