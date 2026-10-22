@@ -6,6 +6,8 @@
 #      API sin cookie 401, export, notificaciones ON, logs sin cookies); panel actual (cabeceras, CSP, noindex, sin estilos
 #      ni scripts inline); assets que la página actual referencia (200); ninguna reseña de prueba en el export; navegador
 #      de solo lectura si Playwright está disponible.
+#      Único hueco permitido en pre: /assets/css/admin.css?v=1 responde 404 porque el archivo nunca se publicó. Se acepta
+#      solo si se cumplen TODAS las condiciones de evaluar_hueco_css, y se informa como KNOWN GAP (nunca como PASS silencioso).
 # post (después de publicar): lo anterior, y además: HTML y assets servidos = commit 590ed7d byte a byte; assets con
 #      ?v=2 y sus Content-Type y Cache-Control; sección, indicador de sesión, "Publicada", slug distinto del nombre
 #      visible; innerHTML y scripts inline; API 401.
@@ -35,6 +37,12 @@ T="$(mktemp -d)"
 chmod 700 "$T"
 trap 'rm -rf "$T"' EXIT
 FALLOS=0
+CSS_REFERENCIADO=0      # 1 si una página actual referencia /assets/css/admin.css?v=1
+CSS_URL=""
+CSS_CODIGO=""
+CSS_MANIFIESTO_OK=0     # el manifiesto contiene assets/css/admin.css exactamente una vez
+CSS_BLOB_OK=0           # el CSS local es el blob de REVISION_REVISADA
+HUECO_ACEPTADO=0
 
 paso() { echo; echo "── $* ──"; }
 
@@ -97,7 +105,66 @@ comparar_con_revision() {  # NOMBRE RUTA_CON_QUERY ARCHIVO
   done
 }
 
+# Único hueco permitido en pre. Cada condición es explícita; si una falla, es FAIL con su motivo. Sin bypass, sin --force.
+#   1. el HTML actual de /admin/resenas o /admin/entrar referencia /assets/css/admin.css?v=1      (CSS_REFERENCIADO)
+#   2. head-object confirma que assets/css/admin.css no existe en el bucket (404 explícito)      (existencia_s3 = no)
+#   3. los demás assets actuales responden 200, y el resto del preflight pasa                    (FALLOS = 0)
+#   4. el manifiesto contiene assets/css/admin.css exactamente una vez                            (CSS_MANIFIESTO_OK)
+#   5. el CSS local es exactamente el blob revisado en 590ed7d                                    (CSS_BLOB_OK)
+#   6. la respuesta de /assets/css/admin.css?v=1 es 404, no otro código                           (CSS_CODIGO)
+evaluar_hueco_css() {
+  local clave=assets/css/admin.css existencia
+  if (( CSS_REFERENCIADO == 0 )); then
+    control "el HTML actual referencia /assets/css/admin.css?v=1" 1 "ninguna de las páginas lo referencia"
+    return 0
+  fi
+  if [[ "$CSS_CODIGO" == 200 ]]; then
+    control "$CSS_URL responde 200: el archivo existe, no hay hueco" 0
+    return 0
+  fi
+  existencia="$(existencia_s3 "$clave")"
+  if [[ "$existencia" == error:* ]]; then
+    control "head-object $clave no es concluyente" 1 "${existencia#error: }"
+    return 0
+  fi
+  if [[ "$existencia" == si ]]; then
+    control "$CSS_URL responde $CSS_CODIGO pero $clave existe en S3" 1
+    return 0
+  fi
+  if [[ "$CSS_CODIGO" != 404 ]]; then
+    control "$CSS_URL responde $CSS_CODIGO: sin archivo en S3 solo se acepta 404" 1
+    return 0
+  fi
+  if (( CSS_MANIFIESTO_OK != 1 )); then
+    control "$CSS_URL: hueco no aceptado, el manifiesto no contiene $clave exactamente una vez" 1
+    return 0
+  fi
+  if (( CSS_BLOB_OK != 1 )); then
+    control "$CSS_URL: hueco no aceptado, el CSS local no es el de $REVISION_REVISADA" 1
+    return 0
+  fi
+  if (( FALLOS > 0 )); then
+    control "$CSS_URL: hueco no aceptado mientras haya otros FAIL" 1
+    return 0
+  fi
+  HUECO_ACEPTADO=1
+  echo "KNOWN GAP  assets/css/admin.css?v=1 no existe en producción; será creado por este deploy"
+}
+
 echo "Verificación $MODO del panel admin contra $BASE (solo lectura)"
+
+paso "0. Repo local: manifiesto y contenido revisado (ambos modos)"
+n_css="$(leer_manifiesto | awk -F'\t' -v a=assets/css/admin.css '$1 == a' | wc -l | tr -d ' ')"
+control "el manifiesto contiene assets/css/admin.css exactamente una vez" "$([[ "$n_css" == 1 ]]; echo $?)" "aparece $n_css veces"
+[[ "$n_css" == 1 ]] && CSS_MANIFIESTO_OK=1
+while IFS=$'\t' read -r archivo clave ct cc rutas; do
+  if blob_coincide "$archivo"; then
+    control "$archivo: contenido local = $REVISION_REVISADA" 0
+    [[ "$archivo" == assets/css/admin.css ]] && CSS_BLOB_OK=1
+  else
+    control "$archivo: contenido local distinto de $REVISION_REVISADA" 1
+  fi
+done < <(leer_manifiesto)
 
 paso "1. Lectura de producción (infra/prod-lectura-v2.sh: /opiniones, /opinar, www, panel, API, export, notificaciones, logs)"
 if PROD_LECTURA_OPINIONES=lanzada PROD_LECTURA_NOTIFY_ESPERADO=true "$LECTURA" > "$T/lectura.txt" 2>&1; then
@@ -148,6 +215,20 @@ while IFS= read -r url; do
   ruta="${url%%\?*}"
   archivo="${ruta#/}"
   nombre="a_$(basename "$ruta")"
+  if [[ "$MODO" == pre ]]; then
+    # Baseline de producción: todo asset del panel que el HTML actual referencia tiene que ser ?v=1. Otra versión es FAIL.
+    if [[ "$ruta" == /assets/css/admin* || "$ruta" == /assets/js/admin-* ]] && [[ "$url" != *'?v=1' ]]; then
+      control "$url: versión inesperada en el HTML actual (pre espera ?v=1)" 1
+      continue
+    fi
+    # admin.css?v=1 se evalúa aparte, en evaluar_hueco_css: su 404 puede ser el único hueco permitido.
+    if [[ "$ruta" == /assets/css/admin.css ]]; then
+      CSS_REFERENCIADO=1
+      CSS_URL="$url"
+      CSS_CODIGO="$(obtener "$nombre" "$url")"
+      continue
+    fi
+  fi
   codigo="$(obtener "$nombre" "$url")"
   control "$url responde 200" "$([[ "$codigo" == 200 ]]; echo $?)" "código $codigo"
   if [[ "$MODO" == post ]]; then
@@ -196,10 +277,19 @@ else
   esac
 fi
 
+if [[ "$MODO" == pre ]]; then
+  paso "7. Hueco conocido: assets/css/admin.css?v=1"
+  evaluar_hueco_css
+fi
+
 echo
 echo "── Resultado ──"
 if (( FALLOS == 0 )); then
-  echo "Verificación $MODO: todo PASS."
+  if (( HUECO_ACEPTADO == 1 )); then
+    echo "Verificación $MODO: todo PASS, con 1 KNOWN GAP explícito (assets/css/admin.css: lo crea este deploy)."
+  else
+    echo "Verificación $MODO: todo PASS."
+  fi
   exit 0
 fi
 echo "Verificación $MODO: $FALLOS control(es) en FAIL. No se cambió nada."

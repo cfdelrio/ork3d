@@ -127,6 +127,10 @@ def main(args):
         estado, tipo, cache, cuerpo, location = 405, 'application/json', NO_STORE, b'{"ok": false}', ''
     else:
         estado, tipo, cache, cuerpo, location = enrutar(partes.hostname or '', ruta)
+        # FAKE_ADMIN_UI_CURL_FORZAR=/ruta=CODIGO: responde ese código para esa ruta (prueba de respuestas inesperadas).
+        forzar_ruta, _, forzar_codigo = os.environ.get('FAKE_ADMIN_UI_CURL_FORZAR', '').partition('=')
+        if forzar_codigo and ruta == forzar_ruta:
+            estado, tipo, cache, cuerpo, location = int(forzar_codigo), 'text/html; charset=utf-8', PUBLICO, b'error', ''
 
     if '-D' in opciones:
         with open(opciones['-D'], 'w', encoding='utf-8') as f:

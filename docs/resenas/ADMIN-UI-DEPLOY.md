@@ -45,7 +45,31 @@ SMOKE_NOTIFY_ID=<id de la reseña de prueba de notificaciones> infra/admin-ui-ve
 
 `SMOKE_NOTIFY_ID` es obligatorio: sin él no se puede confirmar que la reseña de prueba no esté publicada. `pre` no hace login, no envía POST, no envía correos y no crea reseñas.
 
-**Qué esperar en `pre`:** `PASS` en la lectura de producción (`/opiniones` indexable, `/opinar` sano, `www` con 301, API admin sin cookie con 401, notificaciones encendidas, logs sin cookies), `PASS` en CSP, noindex, sin `style=` y sin scripts inline del panel actual, y `PASS` en los assets que la página actual referencia (`?v=1`). Si `admin.css?v=1` responde 404, el panel de producción hoy no tiene hoja de estilos: **no publicar** hasta revisarlo.
+**Qué esperar en `pre`:** `PASS` en la lectura de producción (`/opiniones` indexable, `/opinar` sano, `www` con 301, API admin sin cookie con 401, notificaciones encendidas, logs sin cookies), `PASS` en CSP, noindex, sin `style=` y sin scripts inline del panel actual, y `PASS` en los assets que la página actual referencia (`?v=1`).
+
+El estado real de producción hoy incluye un hueco conocido, modelado explícitamente (ver siguiente sección): `/assets/css/admin.css?v=1` responde 404 porque el archivo nunca fue publicado. El resultado esperado de `pre` es entonces:
+
+```
+KNOWN GAP  assets/css/admin.css?v=1 no existe en producción; será creado por este deploy
+Verificación pre: todo PASS, con 1 KNOWN GAP explícito (assets/css/admin.css: lo crea este deploy).
+```
+
+### Hueco conocido: `assets/css/admin.css`
+
+El único 404 aceptable en `pre` es `/assets/css/admin.css?v=1`, y solo si se cumplen **todas** estas condiciones. Cada una tiene su propio caso negativo en los tests:
+
+1. el HTML actual de `/admin/resenas` o `/admin/entrar` referencia `/assets/css/admin.css?v=1`;
+2. `head-object` confirma que `assets/css/admin.css` no existe en el bucket, con 404 explícito (un 403 o cualquier otro error **no** cuenta como ausencia);
+3. los demás assets del panel responden 200 y el resto del preflight pasa;
+4. el manifiesto contiene `assets/css/admin.css` exactamente una vez;
+5. el CSS local es exactamente el blob revisado en `590ed7d`;
+6. la respuesta de `/assets/css/admin.css?v=1` es exactamente 404.
+
+Además, en `pre` cada asset del panel que referencia el HTML actual tiene que ser `?v=1`: otra versión es FAIL. Si el CSS **existe** y responde 200, no hay hueco y el control es un PASS normal. En `post` no existe excepción: `admin.css?v=2` tiene que responder 200 con el blob revisado.
+
+Lo que sigue siendo FAIL en `pre`: falta cualquier otro asset (`admin-comun.js`, `admin-panel.js`, `admin-entrar.js`), el HTML pide una versión inesperada, el CSS existe pero responde algo distinto de 200, el manifiesto no contiene el CSS, el contenido local no es el revisado, o hay cualquier otra regresión del preflight (en ese caso el hueco tampoco se acepta y se informa por separado).
+
+El hueco se **informa**, no se oculta. Después del deploy, `admin.css` queda creado con sus cabeceras y el hueco deja de existir; `post` verifica que el asset responde 200 con los bytes revisados.
 
 ## Bloque 2 · deploy (EC2)
 
@@ -107,7 +131,7 @@ Para volver a una copia concreta: `ADMIN_UI_COPIA=/tmp/ork3d-admin-ui/copias/<st
 
 ## Tests
 
-`infra/tests/test_admin_ui_publica.py` (35 casos, sin AWS ni red). Usa clones git reales, un bucket y un CloudFront simulados (`aws_fake_admin_ui.py`) y un sitio simulado (`aws_fake_curl_admin_ui.py`). Cubre:
+`infra/tests/test_admin_ui_publica.py` (47 casos, sin AWS ni red). Usa clones git reales, un bucket y un CloudFront simulados (`aws_fake_admin_ui.py`) y un sitio simulado (`aws_fake_curl_admin_ui.py`). Cubre:
 
 - manifiesto exacto y su igualdad con la intersección del diff, y que `admin-entrar.js` queda fuera;
 - rutas de invalidación acotadas, nunca `/*`;
@@ -119,6 +143,7 @@ Para volver a una copia concreta: `ADMIN_UI_COPIA=/tmp/ork3d-admin-ui/copias/<st
 - `revertir` exacto (bytes, cabeceras, metadata, borrado solo de lo que no existía);
 - copias que no se borran; publicación parcial informada; revertir sin copia;
 - `pre` y `post` contra el sitio simulado: pasan en el estado correcto y fallan con HTML de la versión anterior, `style=`, `innerHTML`, asset sin `?v=2` y reseña de prueba visible en el export.
+- el hueco de `admin.css?v=1`: se acepta solo con las seis condiciones y se informa como KNOWN GAP. Cada condición tiene un caso negativo (head-object con 403, existe en S3 pero responde 404, responde 500, falta otro asset, versión inesperada, manifiesto sin el CSS, CSS local distinto, otra regresión que lo tapa). En `post` nunca se acepta.
 
 ## Qué no se ejecutó
 

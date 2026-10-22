@@ -86,3 +86,26 @@ remoto_sha() {
   REMOTO_SHA="$(sha256sum "$destino.cuerpo" | cut -d' ' -f1)"
 }
 
+# Existencia de un objeto en S3, en una sola palabra: si | no | error: <detalle>. Solo "no" con 404 explícito; cualquier
+# otro error (403, 500, red) es "error" y no se interpreta como ausencia. Solo lectura.
+existencia_s3() {
+  local clave="$1" salida
+  if salida="$("$AWS" s3api head-object --bucket "$BUCKET" --key "$clave" --output json 2>&1 < /dev/null)"; then
+    echo si
+  elif grep -q -E '\(404\)|NoSuchKey' <<< "$salida"; then
+    echo no
+  else
+    echo "error: $(tr '\n' ' ' <<< "$salida" | cut -c1-200)"
+  fi
+}
+
+# Verdadero si el archivo local y su blob en HEAD son exactamente el blob de REVISION_REVISADA. Solo lectura de git.
+blob_coincide() {  # ARCHIVO
+  local archivo="$1" local_h head_h rev_h
+  [[ -f "$ROOT/$archivo" ]] || return 1
+  local_h="$("$GIT" -C "$ROOT" hash-object -- "$ROOT/$archivo" 2> /dev/null)" || return 1
+  head_h="$("$GIT" -C "$ROOT" rev-parse "HEAD:$archivo" 2> /dev/null)" || return 1
+  rev_h="$("$GIT" -C "$ROOT" rev-parse "$REVISION_REVISADA:$archivo" 2> /dev/null)" || return 1
+  [[ "$local_h" == "$rev_h" && "$head_h" == "$rev_h" ]]
+}
+

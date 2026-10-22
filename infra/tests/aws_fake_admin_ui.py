@@ -87,6 +87,9 @@ def main(args):
 
     if cli == 's3api head-object':
         clave = opciones['key'][0]
+        if os.environ.get('FAKE_ADMIN_UI_ERROR_HEAD') == clave:
+            sys.stderr.write('An error occurred (403) when calling the HeadObject operation: Forbidden\n')
+            return 254
         if not os.path.exists(ruta_objeto(clave)):
             return no_existe(clave)
         meta = leer_meta(clave)

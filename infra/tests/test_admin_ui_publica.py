@@ -187,8 +187,9 @@ class Entorno(unittest.TestCase):
         with open(ruta + '.json', encoding='utf-8') as f:
             return leer(ruta, 'rb'), json.load(f)
 
-    def construir_sitio(self, cambios=None):
-        """Sitio de producción simulado a partir del clon en HEAD (= contenido de 590ed7d), con cambios opcionales."""
+    def construir_sitio(self, cambios=None, origen=REVISION, css=True):
+        """Sitio de producción simulado. origen: commit cuyo contenido se sirve (590ed7d por defecto, BASE para el
+        baseline actual de producción). css=False: el sitio no tiene assets/css/admin.css (como hoy en producción)."""
         if os.path.exists(self.sitio):
             shutil.rmtree(self.sitio)
         os.makedirs(os.path.join(self.sitio, 'admin-web'))
@@ -204,13 +205,15 @@ class Entorno(unittest.TestCase):
         with open(os.path.join(self.sitio, 'sitemap.xml'), 'w', encoding='utf-8') as f:
             f.write('<urlset><url><loc>https://ork3d.com/opiniones</loc></url></urlset>')
         for ruta in ESTATICOS:
-            datos = blob(REVISION, ruta)
+            if ruta == 'assets/css/admin.css' and not css:
+                continue
+            datos = blob(origen, ruta)
             if cambios and ruta in cambios:
                 datos = cambios[ruta]
             with open(os.path.join(self.sitio, ruta), 'wb') as f:
                 f.write(datos)
         with open(os.path.join(self.sitio, 'assets', 'js', 'admin-entrar.js'), 'wb') as f:
-            f.write(blob(REVISION, 'assets/js/admin-entrar.js'))
+            f.write(blob(origen, 'assets/js/admin-entrar.js'))
 
 
 class ManifiestoTest(unittest.TestCase):
@@ -516,11 +519,13 @@ class PublicarTest(Entorno):
 class VerificarTest(Entorno):
     def setUp(self):
         super().setUp()
-        self.construir_sitio()
+        # Baseline de producción hoy: HTML y JS de e8052cd, y sin assets/css/admin.css (nunca se publicó).
+        self.construir_sitio(origen=BASE, css=False)
 
     def test_pre_es_solo_lectura_y_pasa_en_el_estado_esperado(self):
         r = self.correr(VERIFICAR, 'pre')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('KNOWN GAP  assets/css/admin.css?v=1 no existe en producción; será creado por este deploy', r.stdout)
         self.assertIn('PASS  lectura de producción completa', r.stdout)
         self.assertIn('ninguna reseña de prueba aparece en el export', r.stdout)
         self.assertIn('PASS  /admin/resenas responde 200', r.stdout)
@@ -529,7 +534,12 @@ class VerificarTest(Entorno):
         self.assertTrue(peticiones)
         self.assertEqual({p['metodo'] for p in peticiones}, {'GET'}, 'pre solo hace GET')
         ops = {c.get('op') for c in self.llamadas_aws()}
-        self.assertTrue(ops <= {'lambda get-function-configuration', 'logs filter-log-events'}, f'pre llamó a {ops}')
+        lecturas = {'lambda get-function-configuration', 'logs filter-log-events', 's3api head-object'}
+        self.assertTrue(ops <= lecturas, f'pre llamó a {ops}')
+        self.assertIn('s3api head-object', ops, 'pre confirma con head-object que admin.css no existe')
+        self.assertNotIn('s3api put-object', ops)
+        self.assertNotIn('s3api delete-object', ops)
+        self.assertEqual(self.invalidaciones(), [], 'pre no invalida nada')
 
     def test_pre_exige_smoke_notify_id(self):
         r = self.correr(VERIFICAR, 'pre', extra={'SMOKE_NOTIFY_ID': ''})
@@ -592,6 +602,117 @@ class VerificarTest(Entorno):
         r = self.correr(VERIFICAR, 'pre')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn('INFO  navegador omitido', r.stdout)
+
+
+class HuecoCssTest(Entorno):
+    """El único hueco permitido en pre: /assets/css/admin.css?v=1 → 404. Cada condición tiene su caso negativo."""
+
+    def setUp(self):
+        super().setUp()
+        self.construir_sitio(origen=BASE, css=False)
+
+    def pre(self, extra=None):
+        return self.correr(VERIFICAR, 'pre', extra=extra)
+
+    def assertSinHueco(self, r):
+        self.assertNotIn('KNOWN GAP', r.stdout, 'el hueco no se acepta en este caso')
+
+    def test_hueco_aceptado_se_informa_explicito_y_no_como_pass_silencioso(self):
+        r = self.pre()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('KNOWN GAP  assets/css/admin.css?v=1 no existe en producción; será creado por este deploy', r.stdout)
+        self.assertIn('todo PASS, con 1 KNOWN GAP explícito', r.stdout)
+        self.assertNotRegex(r.stdout, r'(?m)^FAIL')
+
+    def test_css_que_existe_y_responde_200_no_es_hueco(self):
+        self.poner('assets/css/admin.css', blob(REVISION, 'assets/css/admin.css'), CT_CSS, NO_STORE)
+        r = self.pre()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('responde 200: el archivo existe, no hay hueco', r.stdout)
+
+    def test_rechaza_si_head_object_da_error_distinto_de_404(self):
+        r = self.pre(extra={'FAKE_ADMIN_UI_ERROR_HEAD': 'assets/css/admin.css'})
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('FAIL  head-object assets/css/admin.css no es concluyente', r.stdout)
+        self.assertIn('(403)', r.stdout)
+
+    def test_rechaza_si_existe_en_s3_pero_la_ruta_responde_404(self):
+        self.poner('assets/css/admin.css', blob(REVISION, 'assets/css/admin.css'), CT_CSS, NO_STORE)
+        r = self.pre(extra={'FAKE_ADMIN_UI_CURL_FORZAR': '/assets/css/admin.css=404'})
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('FAIL  /assets/css/admin.css?v=1 responde 404 pero assets/css/admin.css existe en S3', r.stdout)
+
+    def test_rechaza_si_admin_css_responde_500_aunque_no_exista(self):
+        r = self.pre(extra={'FAKE_ADMIN_UI_CURL_FORZAR': '/assets/css/admin.css=500'})
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('responde 500: sin archivo en S3 solo se acepta 404', r.stdout)
+
+    def test_rechaza_si_falta_cualquier_otro_asset_del_panel(self):
+        for ruta in ('assets/js/admin-comun.js', 'assets/js/admin-panel.js', 'assets/js/admin-entrar.js'):
+            with self.subTest(ruta=ruta):
+                self.construir_sitio(origen=BASE, css=False)
+                os.remove(os.path.join(self.sitio, ruta))
+                r = self.pre()
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertSinHueco(r)
+                self.assertRegex(r.stdout, rf'FAIL  /{re.escape(ruta)}\?v=1 responde 200 — código 404')
+
+    def test_rechaza_si_el_html_pide_una_version_inesperada_de_un_asset(self):
+        html = blob(BASE, 'admin-web/resenas.html').replace(b'admin-panel.js?v=1', b'admin-panel.js?v=3')
+        self.construir_sitio(cambios={'admin-web/resenas.html': html}, origen=BASE, css=False)
+        r = self.pre()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('FAIL  /assets/js/admin-panel.js?v=3: versión inesperada en el HTML actual', r.stdout)
+
+    def test_rechaza_si_el_css_se_pide_con_otra_version(self):
+        html = blob(BASE, 'admin-web/resenas.html').replace(b'admin.css?v=1', b'admin.css?v=2')
+        self.construir_sitio(cambios={'admin-web/resenas.html': html}, origen=BASE, css=False)
+        r = self.pre()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('FAIL  /assets/css/admin.css?v=2: versión inesperada en el HTML actual', r.stdout)
+
+    def test_rechaza_si_el_manifiesto_no_contiene_el_css(self):
+        ruta = os.path.join(self.clon, 'infra', 'admin-ui-archivos.tsv')
+        with open(ruta, encoding='utf-8') as f:
+            lineas = [l for l in f.readlines() if 'assets/css/admin.css' not in l]
+        with open(ruta, 'w', encoding='utf-8') as f:
+            f.writelines(lineas)
+        r = self.pre()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('FAIL  el manifiesto contiene assets/css/admin.css exactamente una vez', r.stdout)
+        self.assertIn('el manifiesto no contiene assets/css/admin.css exactamente una vez', r.stdout)
+
+    def test_rechaza_si_el_css_local_no_es_el_blob_revisado(self):
+        with open(os.path.join(self.clon, 'assets', 'css', 'admin.css'), 'a', encoding='utf-8') as f:
+            f.write('/* local, no revisado */\n')
+        r = self.pre()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn(f'FAIL  assets/css/admin.css: contenido local distinto de {REVISION}', r.stdout)
+        self.assertIn('el CSS local no es el de ' + REVISION, r.stdout)
+
+    def test_el_hueco_no_tapa_otra_regresion_del_preflight(self):
+        export = json.dumps({'items': [{'id': SMOKE, 'rating': 5, 'comment': 'x', 'aspects': [], 'display_name': 'x',
+                                        'category': 'x', 'product_label': 'x', 'verified': False,
+                                        'photo_url': None, 'published_at': None}]})
+        r = self.pre(extra={'FAKE_ADMIN_UI_EXPORT': export})
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('hueco no aceptado mientras haya otros FAIL', r.stdout)
+
+    def test_post_nunca_acepta_el_hueco(self):
+        self.construir_sitio(origen=REVISION, css=False)
+        r = self.correr(VERIFICAR, 'post')
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertSinHueco(r)
+        self.assertIn('FAIL  /assets/css/admin.css?v=2 responde 200 — código 404', r.stdout)
 
 
 if __name__ == '__main__':
