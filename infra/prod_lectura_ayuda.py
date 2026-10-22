@@ -6,7 +6,7 @@
   robots ARCHIVO VALOR             PASS/FAIL: <meta name="robots"> tiene exactamente VALOR
   sin-enlace ARCHIVO RUTA          PASS/FAIL: la página no enlaza RUTA (p. ej. /opiniones)
   sitemap-sin ARCHIVO RUTA         PASS/FAIL: el sitemap no lista RUTA
-  flag-notificaciones ARCHIVO      PASS/FAIL: RESENAS_NOTIFY_ENABLED de la configuración de la Lambda está apagado
+  flag-notificaciones ARCHIVO [ESPERADO]  PASS/FAIL: RESENAS_NOTIFY_ENABLED es ESPERADO (false por defecto; true tras activar)
   logs-limpios ARCHIVO             PASS/FAIL: ningún evento de la salida de filter-log-events (sin filtro, 24 h) trae
                                    cookie ni Set-Cookie en su texto. Solo imprime conteos y nombres de categoría.
 """
@@ -76,14 +76,22 @@ def sitemap_sin(ruta, destino):
     return f'PASS: el sitemap no lista {destino}'
 
 
-def flag_notificaciones(ruta):
-    """Lee la salida de get-function-configuration y solo mira RESENAS_NOTIFY_ENABLED (nunca imprime el resto)."""
+def flag_notificaciones(ruta, esperado='false'):
+    """Lee la salida de get-function-configuration y solo mira RESENAS_NOTIFY_ENABLED (nunca imprime el resto).
+
+    esperado 'false' (antes de la activación) o 'true' (después de infra/notify-activacion.sh activar).
+    """
     try:
         cfg = json.loads(_leer(ruta))
     except ValueError:
         return 'FAIL: la configuración de la Lambda no es JSON'
     valor = ((cfg.get('Environment') or {}).get('Variables') or {}).get('RESENAS_NOTIFY_ENABLED')
-    if valor is None or str(valor).lower() == 'false':
+    apagado = valor is None or str(valor).lower() == 'false'
+    if esperado == 'true':
+        if str(valor).lower() == 'true':
+            return 'PASS: RESENAS_NOTIFY_ENABLED encendido (true), como se esperaba tras la activación'
+        return f'FAIL: RESENAS_NOTIFY_ENABLED={valor}; se esperaba true'
+    if apagado:
         return 'PASS: RESENAS_NOTIFY_ENABLED apagado (ausente o false)'
     return f'FAIL: RESENAS_NOTIFY_ENABLED={valor}; las notificaciones están encendidas'
 

@@ -106,6 +106,14 @@ class HelpersLecturaTest(unittest.TestCase):
         self.assertTrue(ayuda.flag_notificaciones(cfg('true')).startswith('FAIL'))
         self.assertTrue(ayuda.flag_notificaciones(cfg('TRUE')).startswith('FAIL'))
 
+    def test_flag_con_estado_esperado_true_tras_la_activacion(self):
+        def cfg(valor):
+            return self.archivo('cfg.json', json.dumps({'Environment': {'Variables': {'RESENAS_NOTIFY_ENABLED': valor}}}))
+        self.assertTrue(ayuda.flag_notificaciones(cfg('true'), 'true').startswith('PASS'))
+        self.assertTrue(ayuda.flag_notificaciones(cfg('false'), 'true').startswith('FAIL'))
+        self.assertTrue(ayuda.flag_notificaciones(cfg('false'), 'false').startswith('PASS'))
+        self.assertTrue(ayuda.flag_notificaciones(cfg('true'), 'false').startswith('FAIL'))
+
     def test_el_flag_no_imprime_el_resto_de_la_configuracion(self):
         ruta = self.archivo('cfg.json', json.dumps({'Environment': {'Variables': {
             'RESENAS_NOTIFY_ENABLED': 'false', 'RESENAS_ADMIN_EMAIL': 'no-imprimir@example.com'}}}))
@@ -252,6 +260,12 @@ class PruebaEndToEndTest(unittest.TestCase):
         env.update(extra or {})
         return subprocess.run(['bash', SCRIPT], env=env, cwd=RAIZ, capture_output=True, text=True, timeout=120)
 
+    def peticiones_hechas(self):
+        if not os.path.exists(self.peticiones):
+            return 0
+        with open(self.peticiones, encoding='utf-8') as f:
+            return len(f.readlines())
+
     def lineas(self, r):
         return [l for l in (r.stdout + r.stderr).splitlines() if l[:4] in ('PASS', 'FAIL')]
 
@@ -293,6 +307,17 @@ class PruebaEndToEndTest(unittest.TestCase):
         st = fake.estado_inicial()
         st['publica']['config']['Environment']['Variables']['RESENAS_NOTIFY_ENABLED'] = 'true'
         self.assertIn('FAIL  RESENAS_NOTIFY_ENABLED apagado', self.correr(st).stdout)
+
+    def test_con_la_activacion_esperada_el_control_pasa_y_sin_ella_falla(self):
+        st = fake.estado_inicial()
+        st['publica']['config']['Environment']['Variables']['RESENAS_NOTIFY_ENABLED'] = 'true'
+        self.assertIn('PASS  RESENAS_NOTIFY_ENABLED encendido', self.correr(st, extra={'PROD_LECTURA_NOTIFY_ESPERADO': 'true'}).stdout)
+        self.assertIn('FAIL  RESENAS_NOTIFY_ENABLED encendido', self.correr(fake.estado_inicial(), extra={'PROD_LECTURA_NOTIFY_ESPERADO': 'true'}).stdout)
+
+    def test_estado_esperado_invalido_no_ejecuta_los_controles(self):
+        r = self.correr(extra={'PROD_LECTURA_NOTIFY_ESPERADO': 'si'})
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(self.peticiones_hechas(), 0)
 
     def test_opiniones_enlazada_desde_home_falla_el_control(self):
         with open(os.path.join(self.sitio, 'index.html'), 'a', encoding='utf-8') as f:

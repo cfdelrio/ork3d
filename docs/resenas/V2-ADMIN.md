@@ -867,3 +867,74 @@ pestaña *Application* → *Cookies* → `https://ork3d.com` → fila `ork3d_adm
 cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
   && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr && infra/prod-lectura-v2.sh
 ```
+
+## 19. Activación del aviso de reseña nueva (`RESENAS_NOTIFY_ENABLED`)
+
+Estado: **preparado, no activado**. `infra/notify-activacion.sh` hace la comprobación previa, la escritura y la
+reversión. Ningún comando de esta sección se ejecutó contra AWS desde el entorno de desarrollo.
+
+**Qué cambia y qué no.** La activación es una sola escritura: `update-function-configuration` sobre `ork3d-resenas`
+con todas las variables actuales y `RESENAS_NOTIFY_ENABLED=true`, con `--revision-id` (si alguien cambió la Lambda
+entre la lectura y la escritura, AWS la rechaza). No cambia código, rol, política, Function URL, CloudFront, DNS, SES,
+el bucket, la Lambda admin, `/opiniones` ni el panel. No ejecuta `resenas-setup.sh` ni `setup.sh`.
+
+**Por qué no pierde reseñas si SES falla.** En `app.py`, `create_review` guarda la reseña y libera el claim antes de
+llamar a `_notificar`. `notificar_resena` nunca levanta excepción: si SES falla, registra `aviso_fallido` con el nombre
+de la clase de error y devuelve `False`. Tests: `test_correo.NotificarTest`, `HookPublicoTest` (con SES caído la
+respuesta es 200, la reseña y el claim quedan y no hay registro de aviso).
+
+**Comprobación previa (solo lectura).** `preflight` verifica:
+
+- la Lambda `Active`, `Successful`, `python3.12`, `app.handler`;
+- el código descargado coincide con su `CodeSha256`, y `app.py` y `nucleo/correo.py` son idénticos a HEAD. Si no
+  trae el aviso o difiere de HEAD, **no se activa**: hay que desplegar primero la Lambda pública. Otros archivos
+  distintos (hoy, posiblemente `nucleo/registro.py`) solo se informan;
+- la política `resenas-bucket-privado` del rol tiene exactas las sentencias `NotificarNuevaResenaAlModerador`
+  (`ses:SendEmail` solo desde el remitente hacia el moderador) y `GuardarAvisosDeNotificacion` (`notificaciones/*`);
+- `RESENAS_FROM_EMAIL` y `RESENAS_ADMIN_EMAIL` son identidades `EMAIL_ADDRESS` verificadas y habilitadas para enviar,
+  y el SES de la cuenta tiene el envío habilitado.
+
+Los correos salen enmascarados (`r***@e***.test`). El script no imprime valores de variables ni URLs firmadas.
+
+**Activación.** `activar` vuelve a correr las mismas comprobaciones; si alguna falla, sale con 4 sin escribir nada.
+Antes de escribir guarda la configuración actual en `~/ork3d-notify/rollback/notify-antes.<marca>.json` (600). Después
+de escribir verifica que solo cambió la flag: los mismos nombres de variable, valores, `Runtime`, `Handler`, `Timeout`,
+`Role` y `CodeSha256`. Si la verificación falla, no reintenta: ejecutar `revertir`.
+
+**Observación.** `observar` cuenta, en los últimos `MINUTOS` (60 por defecto), los eventos `resena_creada`,
+`aviso_enviado` y `aviso_fallido` (con la clase de error), sin mostrar textos. Con `REVIEW_ID=<id>` comprueba si
+existe `notificaciones/<id>.json`.
+
+**Reversión.** `revertir` restaura exactamente la configuración guardada (la flag vuelve a no estar, o al valor de
+antes). Las reseñas no cambian.
+
+**Riesgos conocidos, no bloqueantes:**
+
+- Latencia: el cliente SES usa `connect_timeout=3`, `read_timeout=3` y 2 intentos, y la Lambda pública tiene
+  `Timeout=10`. Con SES lento o caído, el aviso puede tardar más que el timeout de la Lambda después de guardar la
+  reseña. La reseña no se pierde, pero el cliente puede ver un error y reintentar contra el claim ya usado. Con SES sano el aviso es una llamada corta (no medida desde aquí). Mitigación de código (un solo intento, timeouts de 2 s) en el próximo despliegue
+  público; no se hace en esta activación.
+- Si el registro `notificaciones/<id>.json` falla después de enviar el correo, el aviso sale pero queda registrado
+  como `aviso_fallido`, y el botón "reenviar aviso" del panel podría enviarlo de nuevo.
+- La Lambda pública puede seguir con el `registro.py` anterior (sanitizador de `bc58135`). El aviso no escribe
+  valores tipo token en los logs, pero el despliegue público con `registro.py` nuevo sigue pendiente.
+- El panel admin construye su servicio de correo siempre (`admin_app.py`), no depende de este flag. Su "reenviar aviso"
+  no cambia con esta activación.
+
+**Procedimiento (una sola línea en EC2).** Solo después de que `prod-lectura-v2.sh` dé PASS con el flag en `false`:
+
+```bash
+cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
+  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr \
+  && infra/notify-activacion.sh preflight \
+  && ALLOW_NOTIFY_ENABLE=1 infra/notify-activacion.sh activar \
+  && infra/notify-activacion.sh observar \
+  && PROD_LECTURA_NOTIFY_ESPERADO=true infra/prod-lectura-v2.sh
+```
+
+Después, **una sola** reseña de prueba desde `ork3d.com`, con un comentario identificable. Confirmar en el buzón del
+moderador el aviso, y luego `REVIEW_ID=<id> infra/notify-activacion.sh observar`. No se borran las reseñas smoke
+`633729550934477689fafb8f576dd851` y `d1cc45e8f15a425890e2a3a8cbbc9ebd`.
+
+**Si algo sale mal:** `ALLOW_NOTIFY_ENABLE=1 infra/notify-activacion.sh revertir`, y después
+`infra/prod-lectura-v2.sh` con el valor por defecto.

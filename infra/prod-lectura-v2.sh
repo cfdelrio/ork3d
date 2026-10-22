@@ -15,6 +15,14 @@ AWS="${AWS_CLI:-aws}"
 BASE="${PROD_LECTURA_BASE:-https://ork3d.com}"
 export AWS_PROFILE="${AWS_PROFILE:-default}" AWS_REGION="${AWS_REGION:-us-east-1}" AWS_PAGER=""
 
+# PROD_LECTURA_NOTIFY_ESPERADO: false antes de activar (por defecto); true después de infra/notify-activacion.sh activar.
+NOTIFY_ESPERADO="${PROD_LECTURA_NOTIFY_ESPERADO:-false}"
+case "$NOTIFY_ESPERADO" in
+  true) NOMBRE_FLAG="RESENAS_NOTIFY_ENABLED encendido" ;;
+  false) NOMBRE_FLAG="RESENAS_NOTIFY_ENABLED apagado" ;;
+  *) echo "ERROR: PROD_LECTURA_NOTIFY_ESPERADO debe ser true o false." >&2; exit 2 ;;
+esac
+
 DIR="$(mktemp -d)"
 chmod 700 "$DIR"
 trap 'rm -rf "$DIR"' EXIT
@@ -104,7 +112,7 @@ fi
 
 # ── Notificaciones: lectura de la configuración de la Lambda pública (sin imprimir el resto) ──
 if "$AWS" lambda get-function-configuration --function-name ork3d-resenas --output json > "$DIR/lambda.json" 2> "$DIR/lambda.err"; then
-  control "RESENAS_NOTIFY_ENABLED apagado" "$(python3 "$AYUDA" flag-notificaciones "$DIR/lambda.json")"
+  control "$NOMBRE_FLAG" "$(python3 "$AYUDA" flag-notificaciones "$DIR/lambda.json" "$NOTIFY_ESPERADO")"
 else
   control "configuración de la Lambda pública legible" "FAIL: no se pudo leer la configuración (lectura, sin cambios)"
 fi

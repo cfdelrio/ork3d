@@ -1074,7 +1074,7 @@ explícita, y su sintaxis exacta se verifica en la cuenta antes del deploy.
 | 8 | Función `ork3d-redirect-www` | `update-function` y `publish-function` con `infra/redirect-www.js` (reglas `/admin/resenas` y `/admin/entrar`) | PLAN |
 | 9 | Lambda pública: política y código | `put-role-policy` con `infra/resenas/lambda-permisos.json` (agrega SES y `notificaciones/*`) y `update-function-code` con `app.py` y `nucleo/` | PLAN |
 | 10 | Frontend admin | `deploy.yml` (agrega `admin-web/**`) | PLAN |
-| 11 | Activar el aviso | `update-function-configuration` con `RESENAS_NOTIFY_ENABLED=true`, solo después de la identidad SES verificada | PLAN |
+| 11 | Activar el aviso | `update-function-configuration` con `RESENAS_NOTIFY_ENABLED=true`, solo después de la identidad SES verificada. Procedimiento y comprobaciones en `V2-ADMIN.md` §19 (`infra/notify-activacion.sh`) | PREPARADO, no activado |
 
 Antes de cada paso PLAN: copia de la configuración actual, en un archivo fuera del repo.
 
