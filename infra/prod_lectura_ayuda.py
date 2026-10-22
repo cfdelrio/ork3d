@@ -76,6 +76,49 @@ def sitemap_sin(ruta, destino):
     return f'PASS: el sitemap no lista {destino}'
 
 
+def indexable(ruta):
+    """/opiniones lanzada: sin noindex, y el canonical es exactamente https://ork3d.com/opiniones."""
+    texto = _leer(ruta)
+    m = re.search(r'<meta name="robots" content="([^"]*)"', texto)
+    if m and 'noindex' in m.group(1).lower():
+        return f'FAIL: robots "{m.group(1)}" bloquea la indexación'
+    c = re.search(r'<link rel="canonical" href="([^"]*)"', texto)
+    if not c:
+        return 'FAIL: falta el canonical'
+    if c.group(1) != 'https://ork3d.com/opiniones':
+        return f'FAIL: canonical es {c.group(1)}, se esperaba https://ork3d.com/opiniones'
+    return 'PASS: indexable, canonical https://ork3d.com/opiniones'
+
+
+def enlaza(ruta, destino):
+    """La página enlaza la ruta (p. ej. /opiniones desde el footer)."""
+    nombre = destino.lstrip('/')
+    if re.search(r'href=["\']/?' + re.escape(nombre) + r'["\'/#?]', _leer(ruta)):
+        return f'PASS: la página enlaza {destino}'
+    return f'FAIL: la página no enlaza {destino}'
+
+
+def sitemap_con(ruta, destino):
+    if destino.lstrip('/') in _leer(ruta):
+        return f'PASS: el sitemap lista {destino}'
+    return f'FAIL: el sitemap no lista {destino}'
+
+
+def smoke_fuera(ruta, *ids):
+    """Ninguna reseña de prueba (smoke) aparece en el export público. Solo cuenta ids; no imprime contenido."""
+    try:
+        datos = json.loads(_leer(ruta))
+    except ValueError:
+        return 'FAIL: el export no es JSON'
+    items = datos.get('items') if isinstance(datos, dict) else None
+    if not isinstance(items, list):
+        return 'FAIL: el export no tiene la lista items'
+    presentes = [i for i in ids if any(isinstance(it, dict) and it.get('id') == i for it in items)]
+    if presentes:
+        return f'FAIL: {len(presentes)} reseña(s) de prueba visibles en el export: DETENER'
+    return f'PASS: ninguna de las {len(ids)} reseñas de prueba aparece en el export'
+
+
 def flag_notificaciones(ruta, esperado='false'):
     """Lee la salida de get-function-configuration y solo mira RESENAS_NOTIFY_ENABLED (nunca imprime el resto).
 
@@ -137,7 +180,7 @@ def logs_limpios(ruta):
     return f'PASS: {len(eventos)} evento(s) revisados'
 
 
-def main(argv):
+def _main(argv):
     orden, args = argv[0], argv[1:]
     if orden == 'exportar':
         resultado = exportar(args[0])
@@ -155,12 +198,29 @@ def main(argv):
         resultado = sitemap_sin(*args)
     elif orden == 'flag-notificaciones':
         resultado = flag_notificaciones(*args)
+    elif orden == 'indexable':
+        resultado = indexable(*args)
+    elif orden == 'enlaza':
+        resultado = enlaza(*args)
+    elif orden == 'sitemap-con':
+        resultado = sitemap_con(*args)
+    elif orden == 'smoke-fuera':
+        resultado = smoke_fuera(*args)
     elif orden == 'logs-limpios':
         resultado = logs_limpios(*args)
     else:
         raise SystemExit(f'orden desconocida: {orden}')
     print(resultado)
     return 0 if resultado.startswith('PASS') else 1
+
+
+def main(argv):
+    """Una lectura que no se puede hacer (archivo ausente, JSON roto) es un FAIL con su causa, no un traceback."""
+    try:
+        return _main(argv)
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+        print(f'FAIL: no se pudo leer o procesar ({type(exc).__name__})')
+        return 1
 
 
 if __name__ == '__main__':

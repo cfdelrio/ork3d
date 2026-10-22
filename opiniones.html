@@ -4,17 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#191919" />
-<!-- Sin enlazar hasta aprobar el diseño: noindex hasta publicarla. -->
-<meta name="robots" content="noindex, follow" />
 
 <title>Opiniones de clientes | ORK3D</title>
-<meta name="description" content="Lo que dicen los clientes de ORK3D sobre trofeos, medallas y piezas personalizadas. Reseñas de pedidos reales, revisadas antes de publicarse." />
+<meta name="description" content="Opiniones de clientes de ORK3D sobre trofeos, medallas y piezas personalizadas. Cada opinión llega con el enlace de un pedido y se revisa antes de publicarse." />
 <link rel="canonical" href="https://ork3d.com/opiniones" />
 
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://ork3d.com/opiniones" />
 <meta property="og:title" content="Opiniones de clientes | ORK3D" />
-<meta property="og:description" content="Reseñas de pedidos reales de trofeos, medallas y piezas personalizadas." />
+<meta property="og:description" content="Opiniones de clientes de ORK3D sobre trofeos, medallas y piezas personalizadas." />
 <meta property="og:image" content="https://ork3d.com/assets/img/og-cover.svg" />
 <meta property="og:locale" content="es_AR" />
 
@@ -23,9 +21,11 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/assets/css/styles.css?v=13" />
-<link rel="stylesheet" href="/assets/css/opiniones.css?v=1" />
+<link rel="stylesheet" href="/assets/css/opiniones.css?v=2" />
 </head>
 <body>
+
+<a class="sr-only sr-only--foco" href="#contenido">Saltar al contenido</a>
 
 <header class="nav" id="nav">
   <div class="container nav__inner">
@@ -53,17 +53,31 @@
   </div>
 </header>
 
-<main class="opiniones">
+<main class="opiniones" id="contenido">
   <div class="container">
     <header class="opiniones__head">
       <p class="opiniones__kicker">Experiencias reales</p>
-      <h1>Opiniones de clientes</h1>
-      <p class="opiniones__lead">Reseñas de pedidos reales. Las revisamos antes de publicarlas, y nunca mostramos datos de contacto.</p>
-      <p class="opiniones__resumen" id="resenas-resumen" hidden></p>
+      <h1>Opiniones de quienes eligieron ORK3D</h1>
+      <p class="opiniones__lead">Lo que cuentan clientes que ya recibieron su pedido. Las revisamos antes de publicarlas y nunca mostramos datos de contacto.</p>
+      <p class="opiniones__cta">
+        <a href="#" class="btn btn--primary"
+           data-wa
+           data-wa-source="opiniones_cabecera"
+           data-wa-msg="Hola ORK3D &#x1F44B;&#10;Vi las opiniones y quiero pedir presupuesto.">Pedir presupuesto</a>
+      </p>
     </header>
 
-    <p class="opiniones__estado" id="resenas-estado" role="status" hidden></p>
-    <ul class="opiniones__lista" id="resenas-lista" aria-label="Opiniones publicadas" hidden></ul>
+    <!-- Reserva su altura desde el primer render: el resumen, el estado y la lista no empujan el contenido al cargar. -->
+    <section class="opiniones__resumen" id="resenas-resumen" aria-labelledby="resumen-titulo">
+      <h2 class="sr-only" id="resumen-titulo">Resumen de las opiniones</h2>
+      <div class="resumen__nota" id="resumen-nota" role="status">Cargando opiniones…</div>
+    </section>
+    <noscript><p class="resumen__nota-sin-js">Para ver las opiniones necesitás JavaScript activado.</p></noscript>
+
+    <section class="opiniones__listado" id="resenas-listado" aria-labelledby="listado-titulo" data-estado="cargando">
+      <h2 class="opiniones__listado-titulo" id="listado-titulo" hidden>Todas las opiniones</h2>
+      <ul class="opiniones__lista" id="resenas-lista" aria-label="Opiniones publicadas" hidden></ul>
+    </section>
   </div>
 </main>
 
@@ -78,6 +92,7 @@
       <a href="/torneos">Para torneos</a>
       <a href="/#empresas">Empresas</a>
       <a href="/#proceso">Cómo funciona</a>
+      <a href="/opiniones">Opiniones</a>
     </div>
     <div class="footer__social">
       <a href="#" data-wa data-wa-source="generic" aria-label="WhatsApp">WhatsApp</a>
@@ -91,6 +106,6 @@
 
 <script src="/config.js"></script>
 <script src="/assets/js/main.js?v=2"></script>
-<script src="/assets/js/resenas-publicas.js?v=1"></script>
+<script src="/assets/js/resenas-publicas.js?v=2"></script>
 </body>
 </html>

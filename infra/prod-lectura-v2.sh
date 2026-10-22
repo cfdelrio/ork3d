@@ -6,6 +6,7 @@
 #
 # Una línea por control (PASS/FAIL). Código 0 si todos pasan, 1 si alguno falla, 2 si no se pudo ejecutar.
 # Variables opcionales: CURL_CMD, AWS_CLI (para pruebas), PROD_LECTURA_BASE (por defecto https://ork3d.com).
+# PROD_LECTURA_OPINIONES (oculta|lanzada), PROD_LECTURA_NOTIFY_ESPERADO (false|true).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +22,13 @@ case "$NOTIFY_ESPERADO" in
   true) NOMBRE_FLAG="RESENAS_NOTIFY_ENABLED encendido" ;;
   false) NOMBRE_FLAG="RESENAS_NOTIFY_ENABLED apagado" ;;
   *) echo "ERROR: PROD_LECTURA_NOTIFY_ESPERADO debe ser true o false." >&2; exit 2 ;;
+esac
+
+# PROD_LECTURA_OPINIONES: oculta (antes del lanzamiento, por defecto) o lanzada (después de publicar /opiniones).
+OPINIONES_ESTADO="${PROD_LECTURA_OPINIONES:-oculta}"
+case "$OPINIONES_ESTADO" in
+  oculta|lanzada) ;;
+  *) echo "ERROR: PROD_LECTURA_OPINIONES debe ser oculta o lanzada." >&2; exit 2 ;;
 esac
 
 DIR="$(mktemp -d)"
@@ -60,12 +68,21 @@ control "home responde 200" "$([[ "$CODIGO_HOME" == 200 ]] && echo PASS || echo 
 
 CODIGO_OPINIONES="$(get opiniones /opiniones)"
 control "/opiniones accesible directamente" "$([[ "$CODIGO_OPINIONES" == 200 ]] && echo PASS || echo "FAIL: HTTP $CODIGO_OPINIONES")"
-control "/opiniones noindex, follow" "$(python3 "$AYUDA" robots "$DIR/opiniones.b" 'noindex, follow')"
-control "home no enlaza /opiniones" "$(python3 "$AYUDA" sin-enlace "$DIR/home.b" /opiniones)"
+if [[ "$OPINIONES_ESTADO" == lanzada ]]; then
+  control "/opiniones indexable, canonical correcto" "$(python3 "$AYUDA" indexable "$DIR/opiniones.b")"
+  control "home enlaza /opiniones (footer)" "$(python3 "$AYUDA" enlaza "$DIR/home.b" /opiniones)"
+else
+  control "/opiniones noindex, follow" "$(python3 "$AYUDA" robots "$DIR/opiniones.b" 'noindex, follow')"
+  control "home no enlaza /opiniones" "$(python3 "$AYUDA" sin-enlace "$DIR/home.b" /opiniones)"
+fi
 
 CODIGO_SITEMAP="$(get sitemap /sitemap.xml)"
 if [[ "$CODIGO_SITEMAP" == 200 ]]; then
-  control "sitemap no lista /opiniones" "$(python3 "$AYUDA" sitemap-sin "$DIR/sitemap.b" /opiniones)"
+  if [[ "$OPINIONES_ESTADO" == lanzada ]]; then
+    control "sitemap lista /opiniones" "$(python3 "$AYUDA" sitemap-con "$DIR/sitemap.b" /opiniones)"
+  else
+    control "sitemap no lista /opiniones" "$(python3 "$AYUDA" sitemap-sin "$DIR/sitemap.b" /opiniones)"
+  fi
 else
   control "sitemap responde 200" "FAIL: HTTP $CODIGO_SITEMAP"
 fi

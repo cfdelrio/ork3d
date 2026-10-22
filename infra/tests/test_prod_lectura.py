@@ -94,8 +94,26 @@ class HelpersLecturaTest(unittest.TestCase):
         self.assertTrue(ayuda.sin_enlace(self.archivo('ok.html', '<a href="/opiniones-otra">x</a>'),
                                          '/opiniones').startswith('PASS'))
 
-    def test_sitemap_del_repo_no_lista_opiniones(self):
-        self.assertTrue(ayuda.sitemap_sin(os.path.join(RAIZ, 'sitemap.xml'), '/opiniones').startswith('PASS'))
+    def test_sitemap_del_repo_lista_opiniones_porque_ya_esta_lanzada(self):
+        ruta = os.path.join(RAIZ, 'sitemap.xml')
+        self.assertTrue(ayuda.sitemap_con(ruta, '/opiniones').startswith('PASS'))
+        self.assertTrue(ayuda.sitemap_sin(ruta, '/opiniones').startswith('FAIL'))
+
+    def test_indexable_exige_sin_noindex_y_canonical_exacto(self):
+        ok = self.archivo('ok.html', '<meta name="robots" content="index, follow" />\n'
+                                     '<link rel="canonical" href="https://ork3d.com/opiniones" />')
+        self.assertTrue(ayuda.indexable(ok).startswith('PASS'))
+        self.assertTrue(ayuda.indexable(self.archivo('a.html', '<meta name="robots" content="noindex, follow" />'
+                                                                '<link rel="canonical" href="https://ork3d.com/opiniones" />')).startswith('FAIL'))
+        self.assertTrue(ayuda.indexable(self.archivo('b.html', '<link rel="canonical" href="https://ork3d.com/opiniones?x=1" />')).startswith('FAIL'))
+        self.assertTrue(ayuda.indexable(self.archivo('c.html', '<p>sin canonical</p>')).startswith('FAIL'))
+
+    def test_smoke_fuera_del_export_detecta_una_visible_sin_mostrar_su_contenido(self):
+        ruta = self.export([dict(ITEM, id='1' * 32, comment='texto de prueba'), dict(ITEM, id='2' * 32)])
+        self.assertTrue(ayuda.smoke_fuera(ruta, '3' * 32, '4' * 32).startswith('PASS'))
+        resultado = ayuda.smoke_fuera(ruta, '1' * 32)
+        self.assertTrue(resultado.startswith('FAIL'))
+        self.assertNotIn('texto de prueba', resultado)
 
     def test_flag_de_notificaciones(self):
         def cfg(valor):
@@ -257,6 +275,7 @@ class PruebaEndToEndTest(unittest.TestCase):
                 json.dump(estado, f)
         env = {'PATH': os.environ.get('PATH', ''), 'CURL_CMD': FAKE_CURL, 'AWS_CLI': FAKE_AWS,
                'FAKE_SITIO_DIR': self.sitio, 'FAKE_ESTADO': self.estado, 'FAKE_CURL_REQ': self.peticiones}
+        env.setdefault('PROD_LECTURA_OPINIONES', 'lanzada')
         env.update(extra or {})
         return subprocess.run(['bash', SCRIPT], env=env, cwd=RAIZ, capture_output=True, text=True, timeout=120)
 
@@ -275,8 +294,8 @@ class PruebaEndToEndTest(unittest.TestCase):
         self.assertEqual(len(fallos), 1, fallos)
         self.assertIn('www redirige al apex', fallos[0])
         pasan = ' | '.join(self.lineas(r))
-        for control in ('home responde 200', '/opiniones accesible directamente', '/opiniones noindex, follow',
-                        'home no enlaza /opiniones', 'sitemap no lista /opiniones',
+        for control in ('home responde 200', '/opiniones accesible directamente', '/opiniones indexable, canonical correcto',
+                        'home enlaza /opiniones (footer)', 'sitemap lista /opiniones',
                         '/opinar/<token> responde la página pública', '/admin/resenas responde 200',
                         '/admin/entrar responde 200', 'API admin sin cookie responde 401',
                         'export público: solo la allowlist', 'foto pública 1', 'RESENAS_NOTIFY_ENABLED apagado',
@@ -319,15 +338,32 @@ class PruebaEndToEndTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertEqual(self.peticiones_hechas(), 0)
 
-    def test_opiniones_enlazada_desde_home_falla_el_control(self):
+    def test_home_sin_enlace_a_opiniones_falla_en_estado_lanzada(self):
+        with open(os.path.join(self.sitio, 'index.html'), encoding='utf-8') as f:
+            texto = f.read()
+        with open(os.path.join(self.sitio, 'index.html'), 'w', encoding='utf-8') as f:
+            f.write(texto.replace('href="/opiniones"', 'href="/otra-pagina"'))
+        self.assertIn('FAIL  home enlaza /opiniones (footer)', self.correr().stdout)
+
+    def test_home_enlazada_falla_en_estado_oculta(self):
         with open(os.path.join(self.sitio, 'index.html'), 'a', encoding='utf-8') as f:
             f.write('<a href="/opiniones">Ver opiniones</a>')
-        self.assertIn('FAIL  home no enlaza /opiniones', self.correr().stdout)
+        self.assertIn('FAIL  home no enlaza /opiniones', self.correr(extra={'PROD_LECTURA_OPINIONES': 'oculta'}).stdout)
 
-    def test_opiniones_con_robots_distinto_falla_el_control(self):
+    def test_estado_oculta_pasa_con_la_pagina_anterior_al_lanzamiento(self):
         with open(os.path.join(self.sitio, 'opiniones.html'), 'w', encoding='utf-8') as f:
-            f.write('<meta name="robots" content="index, follow" />')
-        self.assertIn('FAIL  /opiniones noindex, follow', self.correr().stdout)
+            f.write('<meta name="robots" content="noindex, follow" />')
+        self.assertIn('PASS  /opiniones noindex, follow', self.correr(extra={'PROD_LECTURA_OPINIONES': 'oculta'}).stdout)
+
+    def test_opiniones_con_noindex_falla_en_estado_lanzada(self):
+        with open(os.path.join(self.sitio, 'opiniones.html'), 'w', encoding='utf-8') as f:
+            f.write('<meta name="robots" content="noindex, follow" />')
+        self.assertIn('FAIL  /opiniones indexable, canonical correcto', self.correr().stdout)
+
+    def test_estado_de_opiniones_invalido_no_hace_peticiones(self):
+        r = self.correr(extra={'PROD_LECTURA_OPINIONES': 'publica'})
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(self.peticiones_hechas(), 0)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,10 @@
+# ORK3D · /opiniones: archivos del lanzamiento. Única fuente para el diff, la publicación, la reversión y los tests.
+# Columnas: archivo local, clave en el bucket, content-type, cache-control, rutas a invalidar (separadas por coma).
+# Nada fuera de esta lista se sube. No incluye reseñas, export, fotos, admin, API ni infra.
+opiniones.html	opiniones.html	text/html; charset=utf-8	public, max-age=60, must-revalidate	/opiniones,/opiniones.html
+index.html	index.html	text/html; charset=utf-8	public, max-age=60, must-revalidate	/,/index.html
+torneos.html	torneos.html	text/html; charset=utf-8	public, max-age=60, must-revalidate	/torneos,/torneos.html
+regalos-empresariales-fin-de-ano.html	regalos-empresariales-fin-de-ano.html	text/html; charset=utf-8	public, max-age=60, must-revalidate	/regalos-empresariales-fin-de-ano,/regalos-empresariales-fin-de-ano.html
+sitemap.xml	sitemap.xml	application/xml; charset=utf-8	public, max-age=300, must-revalidate	/sitemap.xml
+assets/css/opiniones.css	assets/css/opiniones.css	text/css; charset=utf-8	public, max-age=300, must-revalidate	/assets/css/opiniones.css
+assets/js/resenas-publicas.js	assets/js/resenas-publicas.js	application/javascript; charset=utf-8	public, max-age=300, must-revalidate	/assets/js/resenas-publicas.js

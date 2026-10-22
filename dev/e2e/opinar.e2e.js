@@ -410,7 +410,7 @@ async function main() {
       const s = await publicasVacio(browser);
       try {
         await s.page.goto(`${BASE}/opiniones`);
-        await s.page.locator('#resenas-estado').filter({ hasText: 'Todavía no hay opiniones publicadas.' })
+        await s.page.locator('#resumen-nota').filter({ hasText: 'Todavía no hay opiniones publicadas.' })
           .waitFor({ state: 'visible', timeout: 8000 });
         esperar(await s.page.locator('#resenas-lista').isHidden(), 'la lista debería estar oculta');
         // El 404 de publicas.json es el caso real "todavía no se exportó nada".
@@ -452,8 +452,8 @@ async function main() {
         await p.reload();
         await p.locator('#resenas-lista').waitFor({ state: 'visible', timeout: 8000 });
 
-        const resumen = await p.locator('#resenas-resumen').innerText();
-        esperar(resumen === '2 opiniones · promedio 4,5 de 5', `resumen: ${resumen}`);
+        const resumen = await p.locator('#resumen-nota').innerText();
+        esperar(resumen.includes('4,5 de 5 · 2 opiniones'), `resumen: ${resumen}`);
         esperar(await p.locator('.resena').count() === 2, 'deberían verse 2 tarjetas');
         const cuerpo = await p.locator('#resenas-lista').innerText();
         esperar(!cuerpo.includes('ana@x.example'), 'no debe mostrarse el contacto');
@@ -478,7 +478,7 @@ async function main() {
       try {
         await s.page.route('**/resenas/publicas.json', (r) => r.fulfill({ status: 500, body: 'error' }));
         await s.page.goto(`${BASE}/opiniones`);
-        await s.page.locator('#resenas-estado').filter({ hasText: 'No pudimos cargar las opiniones.' })
+        await s.page.locator('#resumen-nota').filter({ hasText: 'No pudimos cargar las opiniones.' })
           .waitFor({ state: 'visible', timeout: 8000 });
         // El 500 que simulamos aparece en consola; lo único esperado.
         sinErroresNiExternos({ errores: s.errores, externos: [] }, [/status of 500/]);

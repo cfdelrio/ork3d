@@ -144,17 +144,26 @@ def validar_politicas():
     encontrados = [t for t in terceros if t in opinar]
     comprobar('Reseñas: /opinar no carga analytics ni terceros', not encontrados, f'aparece: {encontrados}')
 
+    # /opiniones: lanzada. Indexable, con canonical exacto, enlazada desde el footer de las páginas públicas
+    # principales y en el sitemap. No se enlaza desde páginas de error, robots, JS de navegación ni CSS global.
     opiniones = leer('opiniones.html')
-    comprobar('Reseñas: /opiniones está en noindex hasta aprobar el diseño',
-              re.search(r'<meta name="robots" content="[^"]*noindex', opiniones) is not None)
+    comprobar('Reseñas: /opiniones indexable (sin noindex)',
+              re.search(r'<meta name="robots" content="[^"]*noindex', opiniones) is None)
+    comprobar('Reseñas: /opiniones con canonical exacto',
+              '<link rel="canonical" href="https://ork3d.com/opiniones" />' in opiniones)
+    for rel in ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html']:
+        pagina = leer(rel)
+        footer = pagina[pagina.index('<div class="footer__links">'):]
+        footer = footer[:footer.index('</div>')]
+        comprobar(f'Reseñas: {rel} enlaza /opiniones desde el footer',
+                  '<a href="/opiniones">Opiniones</a>' in footer)
+    comprobar('Reseñas: /opiniones está en el sitemap', 'https://ork3d.com/opiniones' in leer('sitemap.xml'))
 
-    # /opiniones no debe estar enlazada en ninguna parte del sitio público.
     enlazada = []
-    for rel in ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'error.html',
-                'sitemap.xml', 'robots.txt', 'assets/js/main.js', 'assets/css/styles.css']:
+    for rel in ['error.html', 'robots.txt', 'assets/js/main.js', 'assets/css/styles.css']:
         if 'opiniones' in leer(rel):
             enlazada.append(rel)
-    comprobar('Reseñas: /opiniones no está enlazada en home, navegación, footer ni sitemap',
+    comprobar('Reseñas: /opiniones no se enlaza desde error, robots, JS de navegación ni CSS global',
               not enlazada, f'aparece en: {enlazada}')
 
     config = leer('config.js')
