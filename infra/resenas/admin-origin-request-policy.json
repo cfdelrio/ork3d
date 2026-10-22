@@ -1,6 +1,6 @@
 {
   "Name": "ork3d-resenas-admin-orp",
-  "Comment": "Panel admin V2 (Function URL con OAC): todas las cabeceras del viewer llegan al origen salvo Host; cookie ork3d_admin y query estado solamente. Sin declarar cabeceras x-amz-*.",
+  "Comment": "ORK3D admin API: viewer headers except Host; admin cookie and estado query only",
   "HeadersConfig": {
     "HeaderBehavior": "allExcept",
     "Headers": {

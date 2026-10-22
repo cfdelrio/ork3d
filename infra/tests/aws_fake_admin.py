@@ -351,6 +351,9 @@ def despachar(svc, op, o, pos, st):
 
     if (svc, op) == ('cloudfront', 'create-origin-request-policy'):
         cfg = json.loads(leer_archivo(o['origin-request-policy-config']))
+        # CloudFront limita OriginRequestPolicyConfig.Comment a 128 caracteres (rechazo observado en el tercer intento).
+        if len(cfg.get('Comment', '')) > 128:
+            raise Fallo('InvalidArgument', 'The parameter Comment is too big.', op)
         if os.environ.get('FAKE_ORP_RECHAZO') == '1':
             # Mensaje con datos que jamás deben llegar al registro: correo, cuenta, clave y URL firmada.
             cuenta, clave = '9' * 12, 'AKIA' + 'FAKE' * 4  # datos falsos, armados por partes

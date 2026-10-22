@@ -467,6 +467,11 @@ Regla implementada en `assets/js/admin-comun.js`, función `llamar()`:
     por CloudFront en la primera ejecución real. El cliente sigue enviando el hash en cada POST con body.
   - Cookies (whitelist): `ork3d_admin`. Ninguna otra cookie llega al origen.
   - Query (whitelist): `estado`.
+  - Comment: máximo 128 caracteres. Un comentario más largo fue rechazado por CloudFront en el tercer intento real
+    (`InvalidArgument: The parameter Comment is too big.`). El comentario actual tiene 79 y `validar.py` exige 100 como
+    máximo.
+  - Validar solo el shape con botocore NO alcanza: no detecta límites semánticos de CloudFront (longitud de Comment,
+    combinaciones de cabeceras). Esos límites se controlan explícitamente en `validar.py` y en los tests.
   - `Host` no se reenvía: la Function URL necesita su propio host.
 - El reenvío lo decide la política de origen. La lista es explícita, así que la cabecera de hash llega al
   origen y no depende de la configuración de caché.

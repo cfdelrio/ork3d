@@ -338,6 +338,11 @@ def validar_admin_deploy():
               script.index('ALLOW_ADMIN_DEPLOY') < script.index('"$AWS" sts get-caller-identity'))
     comprobar('Admin deploy: no hay ninguna llamada de escritura fuera de la sección 9 (escrituras)',
               script.index('# ── 9. Escrituras') < script.index('# ── 10. '))
+    # Límite de CloudFront: el Comment de la origin request policy es de 128 caracteres como máximo.
+    # Validar el shape con botocore no lo detecta; por eso se controla aquí.
+    comentario = json.loads(leer('infra/resenas/admin-origin-request-policy.json')).get('Comment', '')
+    comprobar('Admin ORP: el Comment existe y cabe en 128 caracteres (límite de CloudFront), con margen de 100',
+              0 < len(comentario) <= 100, f'{len(comentario)} caracteres')
     r = correr([sys.executable, '-m', 'py_compile', os.path.join(ROOT, 'infra/admin_deploy_ayuda.py')])
     comprobar('Admin deploy: compila infra/admin_deploy_ayuda.py', r.returncode == 0, r.stderr.strip())
     # Entorno vacío: sin ALLOW_ADMIN_DEPLOY=1 el script debe abortar con 3 antes de tocar AWS.

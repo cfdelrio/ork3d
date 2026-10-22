@@ -602,6 +602,44 @@ class OrpTest(unittest.TestCase):
         self.assertEqual(self.orp['QueryStringsConfig'], {'QueryStringBehavior': 'whitelist',
                                                           'QueryStrings': {'Quantity': 1, 'Items': ['estado']}})
 
+    def test_comment_existe_y_cabe_en_el_limite_de_cloudfront(self):
+        comentario = self.orp.get('Comment')
+        self.assertIsInstance(comentario, str)
+        self.assertTrue(comentario)
+        self.assertLessEqual(len(comentario), 128, 'CloudFront rechaza Comment de más de 128 caracteres')
+        self.assertLessEqual(len(comentario), 100, 'margen: el comentario debe quedar por debajo de 100')
+        self.assertLessEqual(len(comentario.encode('utf-8')), 128)
+
+    def test_mantiene_headers_cookies_y_query_restringidos(self):
+        self.assertEqual(self.orp['HeadersConfig']['HeaderBehavior'], 'allExcept')
+        self.assertEqual(self.orp['HeadersConfig']['Headers']['Items'], ['Host'])
+        self.assertEqual(self.orp['CookiesConfig']['Cookies']['Items'], ['ork3d_admin'])
+        self.assertEqual(self.orp['QueryStringsConfig']['QueryStrings']['Items'], ['estado'])
+
+    def _crear_orp_con_fake(self, politica):
+        with tempfile.TemporaryDirectory() as tmp:
+            estado = os.path.join(tmp, 'estado.json')
+            ruta = os.path.join(tmp, 'orp.json')
+            with open(ruta, 'w', encoding='utf-8') as f:
+                json.dump(politica, f, ensure_ascii=False)
+            return subprocess.run([sys.executable, FAKE_AWS, 'cloudfront', 'create-origin-request-policy',
+                                   '--origin-request-policy-config', f'file://{ruta}'],
+                                  env={'FAKE_ESTADO': estado, 'PATH': os.environ.get('PATH', '')},
+                                  capture_output=True, text=True)
+
+    def test_el_fake_rechaza_un_comment_de_mas_de_128_caracteres(self):
+        largo = json.loads(self.texto)
+        largo['Comment'] = 'x' * 129
+        r = self._crear_orp_con_fake(largo)
+        self.assertEqual(r.returncode, 255)
+        self.assertIn('InvalidArgument', r.stderr)
+        self.assertIn('The parameter Comment is too big.', r.stderr)
+
+    def test_el_fake_acepta_la_politica_con_el_comment_nuevo(self):
+        r = self._crear_orp_con_fake(self.orp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('ORK3D admin API', r.stdout)
+
     def test_policy_gestionada_de_cloudfront_no_se_usa(self):
         self.assertNotIn('AllViewerExceptHostHeader', self.texto)
         self.assertNotIn('Managed-AllViewer', self.texto)
