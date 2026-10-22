@@ -448,5 +448,169 @@ class FormasDeLaAyudaTest(unittest.TestCase):
             self.assertFalse(any(FROM in l or ADMIN in l for l in lineas))
 
 
+class NormalizacionOpcionalTest(unittest.TestCase):
+    """normalizar-opcional: stdout vacío = ausente; JSON válido = se conserva; cualquier otra cosa = FAIL."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='opcional-')
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def normalizar(self, contenido):
+        crudo = os.path.join(self.tmp, 'crudo.json')
+        with open(crudo, 'w', encoding='utf-8') as f:
+            f.write(contenido)
+        salida = os.path.join(self.tmp, 'salida.json')
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = ayuda.main(['normalizar-opcional', crudo, salida])
+        return rc, salida, out.getvalue()
+
+    def test_1_json_valido_se_conserva(self):
+        rc, salida, _ = self.normalizar('{"ReservedConcurrentExecutions": 7}')
+        self.assertEqual(rc, 0)
+        self.assertEqual(_leer(salida), {'ReservedConcurrentExecutions': 7})
+
+    def test_2_stdout_vacio_es_ausente(self):
+        for contenido in ('', '   ', '\n'):
+            with self.subTest(contenido=contenido):
+                rc, salida, _ = self.normalizar(contenido)
+                self.assertEqual(rc, 0)
+                self.assertEqual(_leer(salida), {'ausente': True})
+
+    def test_5_contenido_no_vacio_que_no_es_json_falla_y_no_se_guarda(self):
+        for contenido in ('<html>error</html>', '{"a": ', 'Error: algo', 'null'):
+            with self.subTest(contenido=contenido):
+                rc, salida, out = self.normalizar(contenido)
+                self.assertEqual(rc, 1)
+                self.assertIn('FAIL', out)
+                self.assertFalse(os.path.exists(salida))
+
+    def test_la_salida_queda_privada(self):
+        _, salida, _ = self.normalizar('{}')
+        self.assertEqual(stat.S_IMODE(os.stat(salida).st_mode), 0o600)
+
+
+def _leer(ruta):
+    with open(ruta, encoding='utf-8') as f:
+        return json.load(f)
+
+
+class ConcurrenciaOpcionalTest(DespliegueBase):
+    """get-function-concurrency (y url y policy): la ausencia se guarda de forma explícita; no se inventa un valor."""
+    VACIA = 'lambda get-function-concurrency'
+
+    def vacia(self):
+        """El caso real de EC2: exit 0 y stdout vacío."""
+        self.preparar(cambios=lambda st: st.setdefault('vacios', []).append(self.VACIA))
+
+    def desplegar_y_leer(self, nombre):
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY').returncode, 0)
+        (carpeta,) = self.copias()
+        return _leer(os.path.join(carpeta, 'foto', nombre))
+
+    def test_1_get_function_concurrency_con_json_valido_se_conserva(self):
+        self.preparar(cambios=lambda st: st.update(concurrencia={'ReservedConcurrentExecutions': 7}))
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'diff').returncode, 0)
+        self.assertEqual(self.desplegar_y_leer('concurrencia.json'), {'ReservedConcurrentExecutions': 7})
+
+    def test_2_devuelve_objeto_vacio_es_ausencia_canonica(self):
+        self.preparar(cambios=lambda st: st.update(concurrencia={}))
+        self.assertEqual(self.desplegar_y_leer('concurrencia.json'), {'ausente': True})
+
+    def test_3_exit_0_con_stdout_vacio_es_ausencia(self):
+        self.vacia()
+        r = self.correr(SCRIPT_CODIGO, 'diff')
+        self.assertEqual(r.returncode, 0, self.salida(r))
+        self.assertIn('LISTO para desplegar', self.salida(r))
+        self.assertEqual(self.desplegar_y_leer('concurrencia.json'), {'ausente': True})
+
+    def test_4_ausencia_esperada_en_url_y_politica(self):
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY').returncode, 0)
+        (carpeta,) = self.copias()
+        self.assertEqual(_leer(os.path.join(carpeta, 'foto', 'url.json')), {'ausente': True})
+        self.assertEqual(_leer(os.path.join(carpeta, 'foto', 'recurso.json')), {'ausente': True})
+
+    def test_5_contenido_no_vacio_que_no_es_json_falla_y_no_escribe(self):
+        self.preparar(cambios=lambda st: st.update(crudos={self.VACIA: '<html>error</html>'}))
+        r = self.correr(SCRIPT_CODIGO, 'diff')
+        self.assertEqual(r.returncode, 1, self.salida(r))
+        self.assertIn('no es JSON válido', self.salida(r))
+        r = self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY')
+        self.assertEqual(r.returncode, 1, self.salida(r))   # lectura fallida: sale antes de tocar nada
+        self.assertEqual(self.escrituras(), [])
+        self.assertEqual(self.copias(), [])
+
+    def test_6_error_aws_real_no_se_convierte_en_ausencia(self):
+        for codigo in ('AccessDeniedException', 'ThrottlingException', 'ExpiredTokenException'):
+            with self.subTest(codigo=codigo):
+                self.preparar(cambios=lambda st, c=codigo: st.update(errores={self.VACIA: c}))
+                r = self.correr(SCRIPT_CODIGO, 'diff')
+                self.assertEqual(r.returncode, 1, self.salida(r))
+                self.assertIn(codigo, self.salida(r))
+                self.assertNotIn('LISTO', self.salida(r))
+                r = self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY')
+                self.assertEqual(r.returncode, 1, self.salida(r))
+                self.assertEqual(self.escrituras(), [])
+                self.assertEqual(self.copias(), [])
+
+    def test_6b_error_aws_en_url_no_es_ausencia_aunque_la_politica_este_vacia(self):
+        self.preparar(cambios=lambda st: st.update(errores={'lambda get-function-url-config': 'AccessDeniedException'}))
+        r = self.correr(SCRIPT_CODIGO, 'diff')
+        self.assertEqual(r.returncode, 1, self.salida(r))
+        self.assertIn('AccessDeniedException', self.salida(r))
+
+    def test_7_snapshot_completo_con_concurrencia_ausente(self):
+        self.vacia()
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY').returncode, 0)
+        (carpeta,) = self.copias()
+        foto = os.path.join(carpeta, 'foto')
+        for nombre in ('config.json', 'url.json', 'recurso.json', 'concurrencia.json', 'cloudfront.json',
+                       'export.sha', 'codigo.sha', 'desplegado.zip'):
+            ruta = os.path.join(foto, nombre)
+            self.assertTrue(os.path.exists(ruta), nombre)
+            self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600, nombre)
+        self.assertEqual(_leer(os.path.join(foto, 'concurrencia.json')), {'ausente': True})
+
+    def test_8_diff_completo_no_falla_con_concurrencia_ausente(self):
+        self.vacia()
+        r = self.correr(SCRIPT_CODIGO, 'diff')
+        self.assertEqual(r.returncode, 0, self.salida(r))
+        self.assertIn('LISTO para desplegar', self.salida(r))
+        self.assertEqual(self.escrituras(), [])
+
+    def test_9_verify_conserva_la_ausencia(self):
+        self.vacia()
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY').returncode, 0)
+        r = self.correr(SCRIPT_CODIGO, 'verify')
+        self.assertEqual(r.returncode, 0, self.salida(r))
+        self.assertIn('PASS: concurrencia igual que antes', self.salida(r))
+
+    def test_10_rollback_conserva_la_ausencia(self):
+        self.vacia()
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY').returncode, 0)
+        r = self.correr(SCRIPT_CODIGO, 'revertir', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY')
+        self.assertEqual(r.returncode, 0, self.salida(r))
+        self.assertIn('PASS: concurrencia igual que antes', self.salida(r))
+        (carpeta,) = self.copias()
+        self.assertEqual(_leer(os.path.join(carpeta, 'foto', 'concurrencia.json')), {'ausente': True})
+
+    def test_verify_detecta_que_aparecio_una_concurrencia_reservada(self):
+        self.vacia()
+        self.assertEqual(self.correr(SCRIPT_CODIGO, 'deploy', guardia='ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY').returncode, 0)
+        self.cambiar(lambda st: (st.update(vacios=[]), st.update(concurrencia={'ReservedConcurrentExecutions': 3})))
+        r = self.correr(SCRIPT_CODIGO, 'verify')
+        self.assertEqual(r.returncode, 1, self.salida(r))
+        self.assertIn('FAIL: concurrencia igual que antes', self.salida(r))
+
+    def test_el_fake_reproduce_exactamente_el_caso_real_de_ec2(self):
+        self.vacia()
+        r = subprocess.run([sys.executable, FAKE_AWS, 'lambda', 'get-function-concurrency',
+                            '--function-name', FN, '--output', 'json'],
+                           env={'PATH': os.environ.get('PATH', ''), 'FAKE_ESTADO': self.estado_ruta,
+                                'FAKE_LOG': self.log},
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, '')
+
+
 if __name__ == '__main__':
     unittest.main()

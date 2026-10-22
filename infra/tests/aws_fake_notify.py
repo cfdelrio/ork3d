@@ -12,6 +12,10 @@ Variables de entorno:
   FAKE_NOTIFY_FALLA_UPDATE=1    update-function-configuration falla sin cambiar nada
   FAKE_NOTIFY_MUEVE_REVISION=1  otra escritura se adelanta: la revisión cambia antes de la escritura (se rechaza)
 La descarga del código la sirve aws_fake_curl.py con FAKE_CODIGO_ANTERIOR_ARCHIVO (URL fake-code.example).
+Por operación (clave "servicio operación"):
+  errores   {clave: codigo}   falla con ese código de error (exit 255), p. ej. AccessDeniedException
+  crudos    {clave: texto}    stdout exacto, exit 0 (no JSON)
+  vacios    [clave, ...]     exit 0 con stdout vacío, como lo devuelve AWS sin recurso configurado
 """
 import json
 import os
@@ -55,7 +59,18 @@ def _sha(ruta):
         return base64.b64encode(hashlib.sha256(f.read()).digest()).decode('ascii')
 
 
+class Crudo(str):
+    """Salida tal cual (no JSON): para reproducir respuestas que AWS nunca debería dar."""
+
+
 def despachar(svc, op, o, st):
+    clave = f'{svc} {op}'
+    if clave in st.get('errores', {}):
+        raise Fallo(st['errores'][clave], f"simulado: {st['errores'][clave]}", op)
+    if clave in st.get('crudos', {}):
+        return Crudo(st['crudos'][clave])
+    if clave in st.get('vacios', []):
+        return None   # exit 0 y stdout vacío: el caso real observado en EC2 con get-function-concurrency
     publica = st['publica']
     if (svc, op) == ('lambda', 'get-function-configuration'):
         if o.get('function-name') == FN_ADMIN:
@@ -158,7 +173,9 @@ def main():
         sys.exit(255)
     with open(ruta, 'w', encoding='utf-8') as f:
         json.dump(st, f)
-    if resultado is not None:
+    if isinstance(resultado, Crudo):
+        sys.stdout.write(str(resultado))
+    elif resultado is not None:
         print(json.dumps(resultado))
 
 

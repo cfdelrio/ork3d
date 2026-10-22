@@ -984,6 +984,13 @@ contenido, el script se detiene. Guarda la política anterior en `/tmp/ork3d-not
 - CloudFront (ETag, estado y última modificación de la distribución) igual.
 - Export público igual. Si cambió porque se aprobó una reseña, `verify` lo marca para revisar: es un FAIL a propósito.
 
+**Recursos opcionales (Function URL, resource policy, concurrencia).** Una ausencia se guarda como
+`{"ausente": true}` y solo cuenta como tal en dos casos: exit 0 con stdout vacío, o el error de "no existe" de cada
+recurso (`ResourceNotFoundException` para la URL y la policy). Cualquier otra cosa es un FAIL: JSON inválido, texto
+inesperado, `AccessDenied`, throttling, credenciales vencidas. Sin concurrencia reservada, `get-function-concurrency`
+puede responder exit 0 con stdout vacío; eso es la ausencia, no un valor. Un `ReservedConcurrentExecutions` presente
+(también si vale 0) se conserva tal cual; no se inventa ningún valor.
+
 DNS no se toca: ninguno de los scripts llama a Route53, y eso lo comprueba un test estático.
 
 **Rollback.** `ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY=1 infra/notify-public-code-deploy.sh revertir` restaura el Environment

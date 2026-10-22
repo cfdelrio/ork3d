@@ -21,6 +21,7 @@ Despliegue de la Lambda pública (infra/notify-public-code-deploy.sh, infra/noti
   muestra-sentencias PLANTILLA            las sentencias del aviso con placeholders (para revisar el diff de IAM)
   politica-fusion LIVE PLANTILLA BUCKET ORIGEN DESTINO CUENTA SALIDA
                                           agrega solo las sentencias que faltan; nunca quita ni cambia las demás
+  normalizar-opcional CRUDO SALIDA        stdout de un recurso opcional: vacío = ausente; JSON válido; otra cosa = FAIL
   instantanea CONFIG ZIP URL RECURSO CONCURRENCIA CLOUDFRONT EXPORT_SHA CARPETA   foto de lo que debe quedar igual
   verificar-publico ANTES DESPUES CODESHA ADMIN   PASS/FAIL tras la Fase A (flag false, env preservado, resto igual)
   comparar-restauracion ANTES DESPUES     PASS/FAIL tras revertir: configuración y código como antes
@@ -411,12 +412,42 @@ def _dato(ruta):
     return None if isinstance(doc, dict) and doc.get('ausente') else doc
 
 
+def normalizar_opcional(crudo, salida):
+    """Salida de un recurso opcional, ya aceptada por el shell como respuesta válida de AWS.
+
+    stdout vacío (o solo espacios) = ausente, y se guarda como {"ausente": true}.
+    JSON válido = se conserva tal cual. Cualquier otra cosa (texto, HTML, null) = FAIL: no se toma como ausencia.
+    """
+    contenido = _bytes(crudo)
+    if not contenido.strip():
+        _guardar(salida, {'ausente': True})
+        return 0
+    try:
+        doc = json.loads(contenido.decode('utf-8'))
+    except (UnicodeDecodeError, ValueError):
+        print('FAIL: la salida no es JSON válido')
+        return 1
+    if doc is None:
+        print('FAIL: la salida es null: no es una respuesta válida')
+        return 1
+    _guardar(salida, doc)
+    return 0
+
+
+def concurrencia_canonica(doc):
+    """Sin ReservedConcurrentExecutions no hay concurrencia reservada: se guarda como ausencia explícita.
+    No se inventa un 0: si la clave existe, su valor se conserva tal cual (también si es 0)."""
+    if isinstance(doc, dict) and 'ReservedConcurrentExecutions' in doc:
+        return doc
+    return {'ausente': True}
+
+
 def instantanea(config, zip_codigo, url, recurso, concurrencia, cloudfront, export_sha, carpeta):
     """Foto de lo que la Fase A no debe cambiar. Escribe cada parte en la carpeta (600)."""
     os.makedirs(carpeta, exist_ok=True)
-    for nombre, origen in (('config.json', config), ('url.json', url), ('recurso.json', recurso),
-                           ('concurrencia.json', concurrencia)):
+    for nombre, origen in (('config.json', config), ('url.json', url), ('recurso.json', recurso)):
         _guardar(os.path.join(carpeta, nombre), _cargar(origen))
+    _guardar(os.path.join(carpeta, 'concurrencia.json'), concurrencia_canonica(_cargar(concurrencia)))
     # Solo lo que cambia cuando alguien toca la distribución. InProgressInvalidationBatches cambia solo, sin cambio de config.
     distribucion = _cargar(cloudfront).get('Distribution') or {}
     _guardar(os.path.join(carpeta, 'cloudfront.json'), {'ETag': _cargar(cloudfront).get('ETag'),
@@ -508,6 +539,11 @@ def comparar_restauracion(antes, despues):
     marca(_leer_texto(os.path.join(antes, 'codigo.sha')) == _leer_texto(os.path.join(despues, 'codigo.sha')),
           'código exactamente como antes del despliegue')
     marca(cfg_d.get('LastUpdateStatus') == 'Successful', 'LastUpdateStatus Successful tras revertir')
+    for nombre, etiqueta in (('url.json', 'Function URL igual que antes'),
+                             ('recurso.json', 'resource policy igual que antes'),
+                             ('concurrencia.json', 'concurrencia igual que antes'),
+                             ('cloudfront.json', 'CloudFront igual que antes')):
+        marca(_cargar(os.path.join(antes, nombre)) == _cargar(os.path.join(despues, nombre)), etiqueta)
     return lineas
 
 
@@ -535,6 +571,8 @@ def main(argv):
             return muestra_sentencias(*args)
         elif orden == 'politica-fusion':
             lineas = politica_fusion(*args)
+        elif orden == 'normalizar-opcional':
+            return normalizar_opcional(*args)
         elif orden == 'instantanea':
             return instantanea(*args)
         elif orden == 'comparar-paquetes':

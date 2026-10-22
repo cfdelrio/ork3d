@@ -77,14 +77,25 @@ descargar_codigo() {  # CONFIG SALIDA: paquete desplegado; su SHA-256 debe ser e
     || fallo "el código descargado no coincide con su CodeSha256: no se sigue"
 }
 
-leer_opcional() {  # SALIDA COMANDO...: JSON del comando, o {"ausente": true} si AWS dice que no existe
-  local salida="$1"; shift
-  if "$@" > "$salida" 2> "$T/opt.err"; then return 0; fi
-  if [[ "$(codigo_error "$T/opt.err")" == ResourceNotFoundException ]]; then
-    echo '{"ausente": true}' > "$salida"
-  else
-    fallo "lectura fallida ($(detalle "$T/opt.err"))"
+leer_opcional() {  # NOMBRE SALIDA AUSENCIA COMANDO...: recurso opcional; AUSENCIA es el único código de error que
+  # significa "no existe" ("" si ninguno). Se acepta como ausencia y nada más:
+  #   - exit 0 con stdout vacío: AWS no devolvió nada (p. ej. get-function-concurrency sin concurrencia reservada);
+  #   - exit distinto de 0 con el código AUSENCIA (p. ej. ResourceNotFoundException).
+  # Todo lo demás es un fallo: JSON inválido, AccessDenied, throttling, credenciales rotas, cualquier otro error.
+  local nombre="$1" salida="$2" ausencia="$3"; shift 3
+  local crudo
+  crudo="$(mktemp "$T/opc.XXXXXX")"
+  if "$@" > "$crudo" 2> "$T/opt.err"; then
+    python3 "$AYUDA" normalizar-opcional "$crudo" "$salida" \
+      || fallo "$nombre: la respuesta de AWS no es JSON válido; no se toma como ausencia"
+    return 0
   fi
+  if [[ -n "$ausencia" && "$(codigo_error "$T/opt.err")" == "$ausencia" ]]; then
+    : > "$crudo"
+    python3 "$AYUDA" normalizar-opcional "$crudo" "$salida" || fallo "$nombre: no se pudo registrar la ausencia"
+    return 0
+  fi
+  fallo "$nombre: error de AWS, no se toma como ausencia ($(detalle "$T/opt.err"))"
 }
 
 instantanea() {  # CARPETA: foto de lo que la Fase A no debe cambiar (solo lectura)
@@ -92,10 +103,12 @@ instantanea() {  # CARPETA: foto de lo que la Fase A no debe cambiar (solo lectu
   mkdir -p "$carpeta" && chmod 700 "$carpeta"
   leer_config "$T/i-config.json"
   descargar_codigo "$T/i-config.json" "$T/i-codigo.zip"
-  leer_opcional "$T/i-url.json" "$AWS" lambda get-function-url-config --function-name "$FN" --output json
-  leer_opcional "$T/i-recurso.json" "$AWS" lambda get-policy --function-name "$FN" --output json
-  "$AWS" lambda get-function-concurrency --function-name "$FN" --output json > "$T/i-conc.json" 2> "$T/conc.err" \
-    || fallo "no se pudo leer la concurrencia de $FN ($(detalle "$T/conc.err"))"
+  leer_opcional "get-function-url-config" "$T/i-url.json" ResourceNotFoundException \
+    "$AWS" lambda get-function-url-config --function-name "$FN" --output json
+  leer_opcional "get-policy" "$T/i-recurso.json" ResourceNotFoundException \
+    "$AWS" lambda get-policy --function-name "$FN" --output json
+  leer_opcional "get-function-concurrency" "$T/i-conc.json" "" \
+    "$AWS" lambda get-function-concurrency --function-name "$FN" --output json
   "$AWS" cloudfront get-distribution --id "$DIST" --output json > "$T/i-cf.json" 2> "$T/cf.err" \
     || fallo "no se pudo leer la distribución $DIST ($(detalle "$T/cf.err"))"
   "$CURL" -sS -o "$T/i-export.json" "$EXPORT_URL" 2> "$T/exp.err" || fallo "no se pudo leer el export público"
@@ -135,9 +148,13 @@ fi
 
 if [[ "$MODO" == deploy ]]; then
   mkdir -p "$RB" && chmod 700 "$RUTA" "$RB"
-  COPIA="$RB/$(date -u +%Y%m%dT%H%M%S%6NZ)"
-  preparar "$COPIA/foto"
+  # La foto se arma en $T y la carpeta de copia solo se crea si todo salió bien: una lectura fallida no deja
+  # copias a medias que verify o revertir podrían tomar como "la más reciente".
+  preparar "$T/foto"
   (( FALLOS == 0 )) || { echo "NO LISTO: no se escribió nada. Revisá cada FAIL con diff."; exit 4; }
+  COPIA="$RB/$(date -u +%Y%m%dT%H%M%S%6NZ)"
+  mkdir -p "$COPIA" && chmod 700 "$COPIA"
+  cp -pr "$T/foto" "$COPIA/foto" || fallo "no se pudo guardar la foto de antes del despliegue"
   python3 "$AYUDA" snapshot "$COPIA/foto/config.json" "$COPIA/env-antes.json" || fallo "no se pudo guardar el Environment anterior"
   echo "  copias para revertir: $COPIA (600)"
 
