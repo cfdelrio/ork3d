@@ -95,14 +95,18 @@ class Sesiones:
         """Devuelve la fecha de vencimiento si la sesión es válida, o None.
 
         No borra nada: lo llaman también los GET. Las sesiones vencidas las limpia la
-        regla de ciclo de vida de admin/ (2 días).
+        regla de ciclo de vida de admin/ (2 días). Un registro que no se puede leer no es una
+        sesión: se niega (401), igual que una inexistente.
         """
         if not isinstance(secreto, str) or not secreto:
             return None
-        registro, _ = self.almacen.leer_json(self.bucket, self._clave(secreto))
-        if registro is None or _parse(registro['expira']) <= self.ahora():
+        try:
+            registro, _ = self.almacen.leer_json(self.bucket, self._clave(secreto))
+            if registro is None or _parse(registro['expira']) <= self.ahora():
+                return None
+            return registro['expira']
+        except (ValueError, KeyError, TypeError):
             return None
-        return registro['expira']
 
     def cerrar(self, secreto):
         if isinstance(secreto, str) and secreto:
@@ -130,10 +134,15 @@ class Logins:
         if not isinstance(codigo, str) or not CODIGO_RE.fullmatch(codigo):
             raise errores.ErrorCodigo('formato')
         h = hash_secreto(codigo)
-        registro, _ = self.almacen.leer_json(self.bucket, f'admin/logins/{h}.json')
-        if registro is None:
-            raise errores.ErrorCodigo('desconocido')
-        if _parse(registro['expira']) <= self.ahora():
+        try:
+            registro, _ = self.almacen.leer_json(self.bucket, f'admin/logins/{h}.json')
+            if registro is None:
+                raise errores.ErrorCodigo('desconocido')
+            vence = _parse(registro['expira'])
+        except (ValueError, KeyError, TypeError) as exc:
+            # Registro corrupto: no sirve, igual que uno inexistente.
+            raise errores.ErrorCodigo('desconocido') from exc
+        if vence <= self.ahora():
             raise errores.ErrorCodigo('vencido')
         try:
             self.almacen.escribir_json(self.bucket, f'admin/logins-usados/{h}.json',

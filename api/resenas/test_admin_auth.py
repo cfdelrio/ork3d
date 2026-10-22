@@ -274,5 +274,29 @@ class SinEfectosEnLecturaTest(AdminSesionCase):
         self.assertIn(f'admin/sesiones/{_sesion.hash_secreto(secreto)}.json', self.s3.objects)
 
 
+class RegistrosCorruptosTest(AdminCase):
+    """Un registro de sesión o de login que no se puede leer no es válido: la respuesta es 401, nunca 500."""
+
+    def test_sesion_sin_vencimiento_responde_401(self):
+        secreto = 'A' * 43
+        self.s3.objects[f'admin/sesiones/{_sesion.hash_secreto(secreto)}.json'] = b'{"v": 1}'
+        r = self.pedir('GET', '/admin/api/sesion', cookies=[f'ork3d_admin={secreto}'])
+        self.assertEqual((r['statusCode'], datos(r)['error']), (401, 'no_autenticado'))
+
+    def test_sesion_que_no_es_json_responde_401(self):
+        secreto = 'B' * 43
+        self.s3.objects[f'admin/sesiones/{_sesion.hash_secreto(secreto)}.json'] = b'no-es-json'
+        r = self.pedir('GET', '/admin/api/sesion', cookies=[f'ork3d_admin={secreto}'])
+        self.assertEqual((r['statusCode'], datos(r)['error']), (401, 'no_autenticado'))
+
+    def test_login_corrupto_responde_como_codigo_invalido(self):
+        self.assertEqual(self.pedir('POST', '/admin/api/sesion/solicitar', {})['statusCode'], 202)
+        codigo = self.ultimo_codigo()
+        self.s3.objects[f'admin/logins/{_sesion.hash_secreto(codigo)}.json'] = b'{"v": 1}'
+        r = self.pedir('POST', '/admin/api/sesion/confirmar', {'codigo': codigo})
+        self.assertEqual((r['statusCode'], datos(r)), (401, ERROR_CODIGO))
+        self.assertFalse([k for k in self.s3.objects if k.startswith('admin/sesiones/')])
+
+
 if __name__ == '__main__':
     unittest.main()
