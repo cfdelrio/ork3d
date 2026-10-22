@@ -247,17 +247,56 @@ def historial(live, raiz, git):
     return 0
 
 
-def config_funcion(meta, salida):
-    with open(meta, encoding='utf-8') as f:
-        resumen = json.load(f).get('FunctionSummary', {})
-    config = resumen.get('FunctionConfig', {})
+def config_de(meta_json):
+    """FunctionConfig para UpdateFunction: Comment, Runtime y KeyValueStoreAssociations si existe. Sale de la metadata
+    de DEVELOPMENT que devuelve AWS; nunca de memoria. Una asociación KVS omitida se perdería al actualizar."""
+    config = meta_json.get('FunctionSummary', {}).get('FunctionConfig', {})
     runtime = config.get('Runtime')
     if runtime not in RUNTIME_CONOCIDOS:
-        raise SystemExit(f'runtime de la función no reconocido: {runtime!r}')
-    with open(salida, 'w', encoding='utf-8') as f:
-        json.dump({'Comment': config.get('Comment', ''), 'Runtime': runtime}, f)
-    os.chmod(salida, 0o600)
+        raise ValueError(f'runtime de la función no reconocido: {runtime!r}')
+    salida = {'Comment': config.get('Comment', ''), 'Runtime': runtime}
+    if 'KeyValueStoreAssociations' in config:
+        salida['KeyValueStoreAssociations'] = config['KeyValueStoreAssociations']
+    return salida
+
+
+def config_funcion(meta, salida):
+    with open(meta, encoding='utf-8') as f:
+        try:
+            cfg = config_de(json.load(f))
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+    escribir(salida, json.dumps(cfg))
     return 0
+
+
+def borrador(dev, live, candidato):
+    """LIVE si DEVELOPMENT tiene el código de LIVE; CANDIDATO si ya tiene la propuesta; DISTINTO en otro caso."""
+    texto_dev = leer_texto(dev)
+    if texto_dev == leer_texto(live):
+        return 'LIVE'
+    if texto_dev == leer_texto(candidato):
+        return 'CANDIDATO'
+    return 'DISTINTO'
+
+
+def verificar_dev(meta, dev, candidato, config):
+    """0 si DEVELOPMENT tiene exactamente el candidato y la FunctionConfig enviada. 1 con el motivo si no."""
+    with open(meta, encoding='utf-8') as f:
+        actual = config_de(json.load(f))
+    esperada = leer_json(config)
+    if actual != esperada:
+        print(f'DIFIERE: FunctionConfig de DEVELOPMENT {actual} no es la enviada {esperada}')
+        return 1
+    if leer_texto(dev) != leer_texto(candidato):
+        print('DIFIERE: el código de DEVELOPMENT no es la propuesta enviada')
+        return 1
+    return 0
+
+
+def leer_json(ruta):
+    with open(ruta, encoding='utf-8') as f:
+        return json.load(f)
 
 
 def invalidacion(salida, referencia):
@@ -298,6 +337,11 @@ def main(argv):
         return 0
     if orden == 'config-funcion':
         return config_funcion(*args)
+    if orden == 'borrador':
+        print(borrador(*args))
+        return 0
+    if orden == 'verificar-dev':
+        return verificar_dev(*args)
     if orden == 'invalidacion':
         return invalidacion(*args)
     raise SystemExit(f'orden desconocida: {orden}')

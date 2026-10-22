@@ -99,6 +99,23 @@ def validar_behavior_nuevo(behavior):
         raise Fallo('InvalidArgument', 'The parameter CachedMethods is missing.', 'UpdateDistribution')
 
 
+CODIGO_FUNCION_DEMO = 'function handler(event) { return event.request; }\n'
+CONFIG_FUNCION_DEMO = {'Comment': 'ORK3D redirects', 'Runtime': 'cloudfront-js-2.0'}
+ETAPAS_FUNCION = ('LIVE', 'DEVELOPMENT')
+
+
+def etag_nuevo(st, etapa):
+    st['fn']['contador'] += 1
+    return f'E-{etapa}-{st["fn"]["contador"]}'
+
+
+def etapa_de(o):
+    etapa = o.get('stage', 'DEVELOPMENT')  # como la CLI: sin --stage, DEVELOPMENT
+    if etapa not in ETAPAS_FUNCION:
+        raise Fallo('InvalidArgument', f'stage inválido: {etapa}', 'describe-function')
+    return etapa
+
+
 def estado_inicial():
     return {
         'iam': {'ork3d-resenas-lambda': {'trust': TRUST, 'attached': [BASICA], 'inline': {
@@ -122,7 +139,9 @@ def estado_inicial():
         'orps': [],
         'dist': {'etag': 'E2TAGDEMO', 'estado': 'Deployed', 'pendientes': 0,
                  'config': configuracion_distribucion()},
-        'fn': {'etag': 'E2FUNCDEMO', 'codigo': 'function handler(event) { return event.request; }\n'},
+        'fn': {'contador': 0, 'llamadas_live': 0,
+               'LIVE': {'codigo': CODIGO_FUNCION_DEMO, 'etag': 'E-LIVE-0', 'config': dict(CONFIG_FUNCION_DEMO)},
+               'DEVELOPMENT': {'codigo': CODIGO_FUNCION_DEMO, 'etag': 'E-DEV-0', 'config': dict(CONFIG_FUNCION_DEMO)}},
         'ses': {'envio': True, 'produccion': False, 'identidades': {
             FROM: {'IdentityType': 'EMAIL_ADDRESS', 'VerificationStatus': 'SUCCESS',
                    'VerifiedForSendingStatus': True},
@@ -392,26 +411,51 @@ def despachar(svc, op, o, pos, st):
         return {'Distribution': {'Id': DIST, 'Status': 'InProgress'}, 'ETag': st['dist']['etag']}
 
     if (svc, op) == ('cloudfront', 'describe-function'):
-        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionMetadata': {'Stage': 'LIVE'},
-                                    'FunctionConfig': {'Comment': 'ORK3D redirects', 'Runtime': 'cloudfront-js-2.0'}},
-                'ETag': st['fn']['etag']}
+        etapa = etapa_de(o)
+        f = st['fn'][etapa]
+        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionConfig': copy.deepcopy(f['config']),
+                                    'FunctionMetadata': {'Stage': etapa}},
+                'ETag': f['etag']}
+
+    if (svc, op) == ('cloudfront', 'get-function'):
+        etapa = etapa_de(o)
+        if etapa == 'LIVE':
+            st['fn']['llamadas_live'] += 1
+            # Simula un cambio de LIVE entre dos lecturas (otra persona publicó): FAKE_CAMBIO_LIVE_EN_LLAMADA=N.
+            if str(st['fn']['llamadas_live']) == os.environ.get('FAKE_CAMBIO_LIVE_EN_LLAMADA', ''):
+                st['fn']['LIVE']['codigo'] += '// publicado por otra persona\n'
+                st['fn']['LIVE']['etag'] = etag_nuevo(st, 'LIVE')
+        f = st['fn'][etapa]
+        if pos:
+            with open(pos[-1], 'w', encoding='utf-8') as fh:
+                fh.write(f['codigo'])
+        return {'ETag': f['etag'], 'ContentType': 'application/javascript'}
 
     if (svc, op) == ('cloudfront', 'update-function'):
-        if o.get('if-match') != st['fn']['etag']:
-            raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid', op)
-        st['fn']['draft'] = leer_archivo(o['function-code'], binario=True).decode('utf-8')
-        st['fn']['etag'] = 'E-DRAFT-' + str(len(st['fn']['draft']))
-        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionConfig': {'Comment': 'ORK3D redirects',
-                                                                                'Runtime': 'cloudfront-js-2.0'}},
-                'ETag': st['fn']['etag']}
+        # UpdateFunction escribe DEVELOPMENT y exige su ETag vigente. El ETag de LIVE da PreconditionFailed.
+        f = st['fn']['DEVELOPMENT']
+        if os.environ.get('FAKE_FALLA_UPDATE') == '1' or o.get('if-match') != f['etag']:
+            raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid for the resource.', op)
+        cfg = json.loads(leer_archivo(o['function-config']))
+        if 'Runtime' not in cfg:
+            raise Fallo('InvalidArgument', 'FunctionConfig sin Runtime', op)
+        # Como la API real: reemplaza FunctionConfig completo. Un campo omitido (p. ej. KVS) se pierde.
+        f['config'] = {k: v for k, v in cfg.items() if k in ('Comment', 'Runtime', 'KeyValueStoreAssociations')}
+        f['codigo'] = leer_archivo(o['function-code'], binario=True).decode('utf-8')
+        f['etag'] = etag_nuevo(st, 'DEVELOPMENT')
+        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionConfig': copy.deepcopy(f['config'])},
+                'ETag': f['etag']}
 
     if (svc, op) == ('cloudfront', 'publish-function'):
-        if o.get('if-match') != st['fn']['etag'] or 'draft' not in st['fn']:
-            raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid', op)
-        st['fn']['codigo'] = st['fn']['draft']
-        st['fn']['etag'] = 'E-LIVE-' + str(len(st['fn']['codigo']))
-        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionMetadata': {'Stage': 'LIVE'}},
-                'ETag': st['fn']['etag']}
+        # PublishFunction copia DEVELOPMENT a LIVE y exige el ETag de DEVELOPMENT vigente.
+        dev, live = st['fn']['DEVELOPMENT'], st['fn']['LIVE']
+        if os.environ.get('FAKE_FALLA_PUBLISH') == '1' or o.get('if-match') != dev['etag']:
+            raise Fallo('PreconditionFailed', 'The If-Match version is missing or not valid for the resource.', op)
+        live['codigo'] = dev['codigo']
+        live['config'] = copy.deepcopy(dev['config'])
+        live['etag'] = etag_nuevo(st, 'LIVE')
+        return {'FunctionSummary': {'Name': o.get('name'), 'FunctionConfig': copy.deepcopy(live['config'])},
+                'ETag': live['etag']}
 
     if (svc, op) == ('cloudfront', 'create-invalidation'):
         lote = json.loads(leer_archivo(o['invalidation-batch']))
@@ -430,12 +474,6 @@ def despachar(svc, op, o, pos, st):
         with open(destino, 'w', encoding='utf-8') as f:
             f.write(st['sitio'][clave])
         return None
-
-    if (svc, op) == ('cloudfront', 'get-function'):
-        if pos:
-            with open(pos[-1], 'w', encoding='utf-8') as f:
-                f.write(st['fn']['codigo'])
-        return {'ETag': st['fn']['etag'], 'ContentType': 'application/javascript'}
 
     if (svc, op) == ('cloudfront', 'list-origin-access-controls'):
         return {'OriginAccessControlList': {'Quantity': len(st['oacs']), 'Items': st['oacs']}}
@@ -502,6 +540,12 @@ def main():
         detalle = ''
         if (svc, op) == ('cloudfront', 'get-distribution-config'):
             detalle = f" etag={st['dist']['etag']}"
+        if (svc, op) in (('cloudfront', 'describe-function'), ('cloudfront', 'get-function')):
+            detalle = f" stage={o.get('stage', 'DEVELOPMENT')}"
+        if (svc, op) in (('cloudfront', 'update-function'), ('cloudfront', 'publish-function')):
+            detalle = f" if-match={o.get('if-match', '')}"
+        if (svc, op) == ('s3', 'cp'):
+            detalle = ' upload' if pos[1].startswith('s3://') else ' download'
         if (svc, op) == ('cloudfront', 'update-distribution'):
             detalle = f" if-match={o.get('if-match', '')}"
         with open(os.environ['FAKE_LOG'], 'a', encoding='utf-8') as f:

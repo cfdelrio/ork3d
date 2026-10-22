@@ -613,11 +613,20 @@ Escribe solo cinco claves del bucket `ork3d.com`: `admin-web/entrar.html`, `admi
 `assets/js/admin-comun.js`, `assets/js/admin-entrar.js` y `assets/js/admin-panel.js`. Cada una con
 `Cache-Control: no-store, max-age=0`. Las páginas llevan `noindex, nofollow` en el propio HTML.
 
-- Función `ork3d-redirect-www` (la que reescribe `/admin/entrar` y `/admin/resenas`). No se reemplaza nunca por el
-  repo. Se publica LIVE + bloque admin: el bloque de `infra/redirect-www.js` se inserta antes del rewrite de
-  extensionless (`admin_frontend_ayuda.py inyectar`). Antes de escribir, `verificar` comprueba que quitar el bloque da
-  LIVE byte a byte. Si LIVE ya contiene el bloque, no se escribe. Si LIVE no admite la inserción (no hay ancla, faltan
-  `var request`/`var uri` o ya hay reglas `/admin` en código), el script sale con 4 y no escribe.
+- Función `ork3d-redirect-www` (la que reescribe `/admin/entrar` y `/admin/resenas`). Nunca se reemplaza por el repo.
+  Flujo (`admin-frontend-deploy.sh`):
+  1. Fuente: `get-function --stage LIVE` da el código que sirve producción. Ese ETag no se usa para escribir.
+  2. Propuesta: LIVE + bloque admin (`admin_frontend_ayuda.py inyectar`), verificada: quitar el bloque da LIVE byte a byte.
+  3. Concurrencia: justo antes de escribir, LIVE se relee y su SHA-256 tiene que ser el del diagnóstico. Si cambió, sale
+     con 4 y no escribe nada.
+  4. DEVELOPMENT: se lee su código (LIVE o propuesta si es una corrida previa; cualquier otro borrador aborta con 4).
+     Luego se lee su metadata con `describe-function --stage DEVELOPMENT` y se usa ESE ETag en `update-function`. La
+     FunctionConfig sale de esa metadata (Comment, Runtime y KeyValueStoreAssociations si existe).
+  5. Antes de publicar: nueva lectura de DEVELOPMENT (ETag y config vigentes; código = propuesta). Ese ETag va en
+     `publish-function`. Nunca el de LIVE.
+  6. LIVE tras publicar: byte a byte igual a la propuesta, y quitar el bloque da el LIVE anterior.
+  7. Solo entonces se suben las páginas del panel. Si falla update o publish, cero subidas a S3.
+  Ninguna corrida reutiliza ETags de corridas anteriores: los archivos del rollback se guardan, nunca se leen para escribir.
 - Diagnóstico de solo lectura: `FRONT_SOLO_DIAGNOSTICO=1 infra/admin-frontend-deploy.sh`. Muestra el estado, las
   diferencias semánticas (funcional pública preexistente, drift desconocido, formato/comentario, admin nueva), el
   historial de git que más se parece a LIVE, y deja el diff textual completo en el rollback.
@@ -678,3 +687,19 @@ Riesgo que queda abierto: estos scripts escriben `infra/redirect-www.js` sobre l
 No ejecutarlos hasta que `infra/redirect-www.js` sea igual a LIVE + bloque admin. Para reconciliar el repo hace falta
 el diff del diagnóstico de §16.9 (LIVE vs repo). Con ese diff, el repo recibe la lógica de LIVE primero y después
 el bloque admin, nunca al revés.
+
+### 16.12 Causa del PreconditionFailed (CloudFront Functions tienen dos etapas)
+
+Síntoma: `update-function` falló con `PreconditionFailed`. El script enviaba `--if-match` con el ETag de LIVE
+(`describe-function --stage LIVE`, `infra/admin-frontend-deploy.sh` línea ~149). Pero `update-function` escribe
+DEVELOPMENT y exige el ETag de DEVELOPMENT. Los dos ETag son distintos.
+
+Por qué los tests no lo vieron: el simulador (`aws_fake_admin.py`) guardaba una sola función con un solo ETag, e
+ignoraba `--stage`. Con ese modelo, el ETag de LIVE siempre era válido. Ahora el simulador modela DEVELOPMENT y LIVE
+por separado, con código, FunctionConfig y ETag propios. `update-function` solo modifica DEVELOPMENT y exige su ETag;
+`publish-function` copia DEVELOPMENT a LIVE y exige el ETag de DEVELOPMENT.
+
+Demostración: con el script de `582405a` y el simulador nuevo, la corrida registra
+`cloudfront update-function if-match=E-LIVE-0` y falla con `PreconditionFailed`. Con el script actual envía
+`if-match=E-DEV-0`. Las pruebas `test_update_usa_etag_de_development_y_nunca_el_de_live` y
+`test_publish_usa_el_etag_de_development_vigente` fallan con el script anterior.

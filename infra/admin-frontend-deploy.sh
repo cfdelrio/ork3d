@@ -96,13 +96,15 @@ done
 python3 "$AYUDA" bloque-admin "$ROOT/infra/redirect-www.js" > /dev/null || fallo "infra/redirect-www.js no tiene el bloque admin completo"
 echo "  rama $RAMA_ESPERADA · HEAD = remoto · páginas noindex · función del repo con bloque admin"
 
-paso "2. Función CloudFront $FN: estado, diferencias y propuesta (copias de rollback antes de escribir)"
-"$AWS" cloudfront describe-function --name "$FN" --stage LIVE --output json > "$T/fn-meta.json" 2> "$T/fm.err" \
-  || fallo "no se pudo leer la metadata de $FN (código $(detalle "$T/fm.err"))"
+paso "2. Función CloudFront $FN: LIVE como fuente, estado, diferencias y propuesta"
+# LIVE es la fuente: el código que sirve producción. Su ETag no se usa para escribir: UpdateFunction exige el de DEVELOPMENT.
+"$AWS" cloudfront describe-function --name "$FN" --stage LIVE --output json > "$T/fn-meta-live.json" 2> "$T/fm.err" \
+  || fallo "no se pudo leer la metadata de LIVE de $FN (código $(detalle "$T/fm.err"))"
 "$AWS" cloudfront get-function --name "$FN" --stage LIVE "$T/fn-live.js" > /dev/null 2> "$T/fg.err" \
   || fallo "no se pudo leer el código LIVE de $FN (código $(detalle "$T/fg.err"))"
 guardar_rollback cloudfront-funcion-admin-LIVE.js "$T/fn-live.js"
-guardar_rollback cloudfront-funcion-admin-meta.json "$T/fn-meta.json"
+guardar_rollback cloudfront-funcion-admin-meta-LIVE.json "$T/fn-meta-live.json"
+SHA_LIVE="$(sha256sum "$T/fn-live.js" | cut -d' ' -f1)"
 ESTADO_FN="$(python3 "$AYUDA" estado "$T/fn-live.js" "$ROOT/infra/redirect-www.js")"
 echo "  estado de LIVE frente al repo: $ESTADO_FN"
 echo "  diferencias LIVE vs repo (semánticas; el diff textual completo queda en el archivo indicado):"
@@ -143,18 +145,50 @@ for f in "${PAGINAS[@]}"; do
   fi
 done
 
-paso "4. Escrituras"
+paso "4. Escrituras de la función (solo si LIVE admite el bloque admin)"
 if [[ "$ESTADO_FN" == SIN_BLOQUE ]]; then
-  python3 "$AYUDA" config-funcion "$T/fn-meta.json" "$T/fn-config.json" || fallo "configuración de $FN no reconocida"
-  "$AWS" cloudfront update-function --name "$FN" --if-match "$(valor "$T/fn-meta.json" ETag)" \
+  # a) Concurrencia: LIVE tiene que seguir siendo el que se usó para construir la propuesta. Si no, no se escribe nada.
+  "$AWS" cloudfront get-function --name "$FN" --stage LIVE "$T/fn-live-2.js" > /dev/null 2> "$T/fg2.err" \
+    || fallo "no se pudo releer LIVE antes de escribir (código $(detalle "$T/fg2.err"))"
+  [[ "$(sha256sum "$T/fn-live-2.js" | cut -d' ' -f1)" == "$SHA_LIVE" ]] \
+    || distinto "LIVE cambió desde el diagnóstico (otra publicación): no se escribió nada. Volvé a ejecutar el script."
+  # b) DEVELOPMENT: se lee su código actual. Solo puede ser LIVE (lo normal) o la propuesta (una corrida previa).
+  "$AWS" cloudfront get-function --name "$FN" --stage DEVELOPMENT "$T/fn-dev-1.js" > /dev/null 2> "$T/fd1.err" \
+    || fallo "no se pudo leer DEVELOPMENT de $FN (código $(detalle "$T/fd1.err"))"
+  BORRADOR="$(python3 "$AYUDA" borrador "$T/fn-dev-1.js" "$T/fn-live.js" "$T/fn-propuesta.js")"
+  [[ "$BORRADOR" != DISTINTO ]] \
+    || distinto "DEVELOPMENT tiene un código distinto de LIVE y de la propuesta: no se escribió nada (revisar la función en la consola)"
+  echo "  DEVELOPMENT parte de: $BORRADOR"
+  guardar_rollback cloudfront-funcion-admin-DEV-previo.js "$T/fn-dev-1.js"
+  # c) ETag y FunctionConfig de DEVELOPMENT, leídos en este momento y no de corridas anteriores. Entre esta lectura y
+  #    update-function no hay otra lectura de AWS.
+  "$AWS" cloudfront describe-function --name "$FN" --stage DEVELOPMENT --output json > "$T/fn-dev-meta.json" 2> "$T/fdm.err" \
+    || fallo "no se pudo leer la metadata de DEVELOPMENT (código $(detalle "$T/fdm.err"))"
+  guardar_rollback cloudfront-funcion-admin-DEV-meta.json "$T/fn-dev-meta.json"
+  python3 "$AYUDA" config-funcion "$T/fn-dev-meta.json" "$T/fn-config.json" || fallo "configuración de DEVELOPMENT no reconocida"
+  "$AWS" cloudfront update-function --name "$FN" --if-match "$(valor "$T/fn-dev-meta.json" ETag)" \
     --function-config "file://$T/fn-config.json" --function-code "fileb://$T/fn-propuesta.js" \
-    --output json > "$T/fn-upd.json" 2> "$T/fu.err" || fallo "update-function ($(detalle "$T/fu.err")); copia de rollback en $RB"
-  "$AWS" cloudfront publish-function --name "$FN" --if-match "$(valor "$T/fn-upd.json" ETag)" \
-    --output json > "$T/fn-pub.json" 2> "$T/fp.err" || fallo "publish-function ($(detalle "$T/fp.err")); copia de rollback en $RB"
+    --output json > "$T/fn-upd.json" 2> "$T/fu.err" \
+    || fallo "update-function ($(detalle "$T/fu.err")); DEVELOPMENT previo en $RB"
+  echo "  DEVELOPMENT actualizado (update-function devolvió su nuevo ETag)"
+  # d) Antes de publicar: ETag de DEVELOPMENT vigente, código y config tienen que ser exactamente los enviados.
+  "$AWS" cloudfront describe-function --name "$FN" --stage DEVELOPMENT --output json > "$T/fn-dev-meta-2.json" 2> "$T/fdm2.err" \
+    || fallo "no se pudo releer la metadata de DEVELOPMENT (código $(detalle "$T/fdm2.err"))"
+  "$AWS" cloudfront get-function --name "$FN" --stage DEVELOPMENT "$T/fn-dev-2.js" > /dev/null 2> "$T/fd2.err" \
+    || fallo "no se pudo releer el código de DEVELOPMENT (código $(detalle "$T/fd2.err"))"
+  python3 "$AYUDA" verificar-dev "$T/fn-dev-meta-2.json" "$T/fn-dev-2.js" "$T/fn-propuesta.js" "$T/fn-config.json" \
+    || fallo "DEVELOPMENT no quedó con la propuesta y la config enviadas: no se publica (DEVELOPMENT previo en $RB)"
+  # e) PublishFunction copia DEVELOPMENT a LIVE con su ETag vigente. Nunca se usa el ETag de LIVE.
+  "$AWS" cloudfront publish-function --name "$FN" --if-match "$(valor "$T/fn-dev-meta-2.json" ETag)" \
+    --output json > "$T/fn-pub.json" 2> "$T/fp.err" \
+    || fallo "publish-function ($(detalle "$T/fp.err")); DEVELOPMENT previo en $RB"
+  # f) LIVE tras publicar: el candidato exacto, y quitar el bloque admin da el LIVE anterior byte a byte.
   "$AWS" cloudfront get-function --name "$FN" --stage LIVE "$T/fn-verif.js" > /dev/null 2> "$T/fv.err" \
-    || fallo "no se pudo releer el código LIVE tras publicar"
+    || fallo "no se pudo releer LIVE tras publicar (código $(detalle "$T/fv.err"))"
   cmp -s "$T/fn-verif.js" "$T/fn-propuesta.js" || fallo "LIVE no coincide con la propuesta tras publicar; restaurar desde $RB"
-  echo "  $FN publicada: LIVE = LIVE + bloque admin (verificado byte a byte)"
+  python3 "$AYUDA" verificar "$T/fn-live.js" "$T/fn-verif.js" "$ROOT/infra/redirect-www.js" \
+    || fallo "LIVE publicado cambia algo de LIVE anterior; restaurar desde $RB"
+  echo "  $FN publicada: LIVE = LIVE anterior + bloque admin (verificado byte a byte)"
 else
   echo "  $FN: sin cambios (ya contiene el bloque admin)"
 fi
