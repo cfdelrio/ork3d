@@ -3,9 +3,14 @@
 
 Responde con datos de muestra y registra cada llamada. Las operaciones sin respuesta de muestra devuelven {}.
 Variables de entorno:
-  FAKE_LOG          registro de llamadas (servicio y operación por línea)
-  FAKE_STS_FAIL=1   la autenticación falla, con un texto que contiene una clave y un secreto de ejemplo
-                    (sirve para comprobar que el preflight los redacta)
+  FAKE_LOG                       registro de llamadas: servicio, operación y el --bucket, --role-name o
+                                 --function-name de la llamada
+  FAKE_STS_FAIL=1                la autenticación falla, con un texto que contiene una clave y un secreto de
+                                 ejemplo (sirve para comprobar que el preflight los redacta)
+  FAKE_CONCURRENCIA_VACIA=1      get-function-concurrency responde rc 0 con stdout vacío (sin concurrencia)
+  FAKE_CONCURRENCIA_JSON_INVALIDO=1  get-function-concurrency responde rc 0 con algo que no es JSON
+  FAKE_IAM_LISTAS_VACIAS=1       las listas de IAM responden rc 0 con stdout vacío
+  FAKE_IAM_RC=1                  iam get-role falla con AccessDenied (rc 255)
 """
 import json
 import os
@@ -92,8 +97,23 @@ def main():
     servicio, operacion = sys.argv[1], sys.argv[2]
     args = sys.argv[3:]
     if os.environ.get('FAKE_LOG'):
+        extra = ''.join(f' {flag[2:]}={args[args.index(flag) + 1]}'
+                        for flag in ('--bucket', '--role-name', '--function-name') if flag in args)
         with open(os.environ['FAKE_LOG'], 'a', encoding='utf-8') as f:
-            f.write(f'{servicio} {operacion}\n')
+            f.write(f'{servicio} {operacion}{extra}\n')
+    if (servicio, operacion) == ('lambda', 'get-function-concurrency'):
+        if os.environ.get('FAKE_CONCURRENCIA_VACIA') == '1':
+            return
+        if os.environ.get('FAKE_CONCURRENCIA_JSON_INVALIDO') == '1':
+            print('respuesta sin formato')
+            return
+    if servicio == 'iam' and operacion in ('list-attached-role-policies', 'list-role-policies') \
+            and os.environ.get('FAKE_IAM_LISTAS_VACIAS') == '1':
+        return
+    if (servicio, operacion) == ('iam', 'get-role') and os.environ.get('FAKE_IAM_RC') == '1':
+        sys.stderr.write('An error occurred (AccessDenied) when calling the GetRole operation: '
+                         'User is not authorized to perform: iam:GetRole\n')
+        sys.exit(255)
     if (servicio, operacion) == ('sts', 'get-caller-identity'):
         if os.environ.get('FAKE_STS_FAIL') == '1':
             sys.stderr.write(f'An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity '

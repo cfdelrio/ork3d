@@ -299,7 +299,7 @@ def validar_preflight_v2():
     r = correr([sys.executable, '-m', 'py_compile', preflight])
     comprobar('Preflight V2: compila infra/preflight_v2.py', r.returncode == 0, r.stderr.strip())
     fuente = leer(preflight)
-    llamadas = set(re.findall(r"\bro\(\s*'([a-z0-9]+)',\s*'([a-z0-9-]+)'", fuente))
+    llamadas = set(re.findall(r"\b(?:ro|leer)\(\s*'([a-z0-9]+)',\s*'([a-z0-9-]+)'", fuente))
     spec = importlib.util.spec_from_file_location('preflight_v2', os.path.join(ROOT, preflight))
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)

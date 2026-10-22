@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """Preflight AWS de V2: lee la configuración actual de la cuenta. SOLO LECTURA.
 
-Lee: Lambda pública (configuración, Function URL, resource policy, concurrencia), rol IAM de la Lambda
-pública, distribución de CloudFront del sitio (con su copia de rollback), función de redirección, OAC y
-políticas de origen existentes, buckets privado y del sitio (configuración y existencia de prefijos), log
+Lee: Lambda pública (configuración, Function URL, resource policy, concurrencia), Lambda admin (si existe),
+rol IAM de la Lambda pública (políticas administradas e inline), distribución de CloudFront del sitio (con su
+copia de rollback), función de redirección, OAC y políticas de origen, bucket privado y bucket del sitio, log
 groups de CloudWatch y SES (estado de la cuenta e identidades, sin crear ni verificar nada).
 
 Garantías:
 - Cada llamada a AWS pasa por ro(). Solo ejecuta operaciones de PERMITIDAS, nunca las que tienen un verbo
   mutante (VERBOS_MUTANTES) y nunca las de EXCLUIDAS (contenido de objetos, URLs firmadas, contactos).
   Cualquier otra operación aborta el script antes de llamar a AWS.
+- Cada lectura tiene un contrato (leer()): un rc distinto de cero, un stdout vacío donde no se espera, o una
+  salida que no es JSON se reportan como ERROR con servicio, operación, rc y tipo. Un stdout vacío se trata como
+  "sin datos" solo cuando la operación lo admite (vacio_ok). Nunca se parsea un stdout vacío.
+- La configuración de la Lambda se conserva en memoria y la usan los pasos siguientes (bucket privado, rol de
+  IAM). La copia de rollback no guarda los valores de las variables.
 - No imprime AccessKey, SecretKey ni SessionToken. Los errores de la CLI se redactan antes de mostrarse.
-- Enmascara el account ID (últimos 4 dígitos) y las direcciones de correo.
-- De las variables de entorno de la Lambda imprime solo los nombres. Las copias de rollback no guardan valores.
-- No lee contenido de objetos: ni reseñas, ni tokens, ni contactos, ni comentarios.
+- Enmascara el account ID (últimos 4 dígitos), las direcciones de correo y el nombre de los buckets en los ARN.
+- De las variables de entorno imprime solo los nombres.
+- No lee contenido de objetos: ni reseñas, ni tokens, ni contactos, ni comentarios. De los prefijos del bucket
+  privado solo informa sí/no, con max-keys 1.
 - Las copias de rollback se guardan con permisos 600 en OUT/rollback.
 
 Uso (desde EC2, con el perfil configurado):
@@ -35,8 +41,9 @@ FN_PUBLICA = 'ork3d-resenas'
 FN_ADMIN = 'ork3d-resenas-admin'
 REDIRECT = 'ork3d-redirect-www'
 DOMINIO = 'ork3d.com'
-PREFIJOS = ('resenas/', 'tokens/', 'claims/', 'pendientes/', 'notificaciones/', 'admin/')
+PREFIJOS = ('tokens/', 'claims/', 'resenas/', 'pendientes/', 'admin/', 'notificaciones/')
 OUT_POR_DEFECTO = '/tmp/ork3d-v2-preflight'
+CODIGO_ERROR = re.compile(r'An error occurred \((\w+)\)')
 
 # Lista explícita de lectura: (servicio, expresión sobre el nombre de la operación).
 PERMITIDAS = (
@@ -47,7 +54,7 @@ PERMITIDAS = (
     ('cloudfront', r'list-.+'),
     ('s3api', r'get-.+'),
     ('s3api', r'head-.+'),
-    ('s3api', r'list-objects-v2'),  # solo para comprobar que un prefijo existe, con --max-keys 1
+    ('s3api', r'list-objects-v2'),  # solo para comprobar que un prefijo tiene objetos, con --max-keys 1
     ('iam', r'get-.+'),
     ('iam', r'list-.+'),
     ('logs', r'describe-.+'),
@@ -86,6 +93,14 @@ class OperacionNoPermitida(Exception):
 
 class AutenticacionFallida(Exception):
     pass
+
+
+class ErrorAws(Exception):
+    """Una lectura de AWS falló o devolvió algo que su contrato no admite. Solo lleva datos sanitizados."""
+
+    def __init__(self, servicio, operacion, rc, tipo, detalle=''):
+        self.servicio, self.operacion, self.rc, self.tipo = servicio, operacion, rc, tipo
+        super().__init__(f'{servicio} {operacion} rc={rc} tipo={tipo}' + (f' · {detalle}' if detalle else ''))
 
 
 def perfil():
@@ -140,8 +155,21 @@ def sin_valores(cfg):
     return copia
 
 
+def como_lista(valor):
+    """Un campo de la respuesta que puede venir como lista, como valor suelto o ausente."""
+    if valor is None:
+        return []
+    return valor if isinstance(valor, list) else [valor]
+
+
+def tipo_de(err):
+    m = CODIGO_ERROR.search(err or '')
+    return m.group(1) if m else 'desconocido'
+
+
 def ro(servicio, operacion, *args, pos=None, check=True):
-    """Única puerta a AWS del preflight. Verifica la lista explícita antes de llamar a la CLI."""
+    """Única puerta a AWS del preflight. Verifica la lista explícita antes de llamar a la CLI.
+    Con check=True, un rc distinto de cero lanza ErrorAws. Con check=False devuelve el resultado tal cual."""
     if not permitida(servicio, operacion):
         raise OperacionNoPermitida(f'{servicio} {operacion}')
     cmd = [os.environ.get('AWS_CLI', 'aws'), servicio, operacion, *args,
@@ -152,8 +180,39 @@ def ro(servicio, operacion, *args, pos=None, check=True):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
     res = Resultado(r.returncode, r.stdout, redactar(r.stderr))
     if check and r.returncode != 0:
-        raise RuntimeError(f'{servicio} {operacion} rc={r.returncode}: {res.err.strip()[:300]}')
+        raise ErrorAws(servicio, operacion, r.returncode, tipo_de(res.err), res.err.strip()[:200])
     return res
+
+
+def json_de(texto, servicio, operacion, rc=0):
+    """Parsea JSON. Si no lo es, error de tipo json_invalido, sin mostrar el contenido."""
+    try:
+        return json.loads(texto)
+    except json.JSONDecodeError:
+        raise ErrorAws(servicio, operacion, rc, 'json_invalido', 'la salida no es JSON') from None
+
+
+def leer(servicio, operacion, *args, pos=None, vacio_ok=False, ausente=()):
+    """Lee una operación y devuelve su JSON según su contrato.
+
+    - rc != 0: devuelve None si el tipo de error está en `ausente` (el recurso no tiene esa configuración).
+      Cualquier otro tipo lanza ErrorAws con servicio, operación, rc y tipo.
+    - stdout vacío: devuelve {} si `vacio_ok` (la operación no devuelve datos cuando no hay nada configurado).
+      Si no, lanza ErrorAws de tipo stdout_vacio.
+    - stdout que no es JSON: lanza ErrorAws de tipo json_invalido.
+    """
+    res = ro(servicio, operacion, *args, pos=pos, check=False)
+    if res.rc != 0:
+        tipo = tipo_de(res.err)
+        if tipo in ausente:
+            return None
+        raise ErrorAws(servicio, operacion, res.rc, tipo, res.err.strip()[:200])
+    texto = res.out.strip()
+    if not texto:
+        if vacio_ok:
+            return {}
+        raise ErrorAws(servicio, operacion, res.rc, 'stdout_vacio', 'la operación debía devolver JSON')
+    return json_de(texto, servicio, operacion, res.rc)
 
 
 class Informe:
@@ -166,6 +225,11 @@ class Informe:
     def linea(self, texto=''):
         print(texto)
         self.lineas.append(texto)
+
+    def error(self, texto):
+        limpio = redactar(texto)[:400]
+        self.linea('ERROR: ' + limpio)
+        self.errores.append(limpio)
 
     def guardar_rollback(self, nombre, datos):
         ruta = os.path.join(self.out, 'rollback', nombre)
@@ -183,29 +247,43 @@ class Informe:
 
 
 def paso(inf, titulo, fn, *args):
+    """Un paso del informe. Si una lectura falla, el error queda registrado y devuelve None; los demás pasos siguen."""
     inf.linea('')
     inf.linea('## ' + titulo)
     try:
         return fn(inf, *args)
-    except OperacionNoPermitida:
-        raise
-    except Exception as exc:  # un paso que falla no detiene los demás
-        inf.linea('ERROR: ' + redactar(str(exc))[:300])
-        inf.errores.append(titulo)
+    except ErrorAws as exc:
+        inf.error(str(exc))
         return None
 
 
+def chequeo(inf, nombre, fn):
+    """Una comprobación dentro de un paso: si falla, se registra y las siguientes comprobaciones siguen."""
+    try:
+        return fn()
+    except ErrorAws as exc:
+        inf.error(f'{nombre}: {exc}')
+        return None
+
+
+def omitido(inf, titulo, motivo):
+    inf.linea('')
+    inf.linea('## ' + titulo)
+    inf.linea(f'No se analiza: {motivo}')
+
+
 def paso_identidad(inf):
-    r = ro('sts', 'get-caller-identity', check=False)
-    if r.rc != 0:
-        raise AutenticacionFallida(r.err.strip()[:300])
-    d = json.loads(r.out)
+    try:
+        d = leer('sts', 'get-caller-identity')
+    except ErrorAws as exc:
+        raise AutenticacionFallida(str(exc)) from None
     inf.linea(f"Cuenta: ****{d['Account'][-4:]} · identidad: {enmascarar(d['Arn'])}")
     return d
 
 
-def paso_lambda_publica(inf, fn):
-    cfg = json.loads(ro('lambda', 'get-function-configuration', '--function-name', fn).out)
+def paso_config_publica(inf, fn):
+    """Configuración de la Lambda pública. Devuelve la respuesta completa, en memoria, sin sanitizar."""
+    cfg = leer('lambda', 'get-function-configuration', '--function-name', fn)
     variables = sorted(((cfg.get('Environment') or {}).get('Variables') or {}).keys())
     inf.linea(f"Nombre: {cfg.get('FunctionName')} · runtime: {cfg.get('Runtime')} · handler: {cfg.get('Handler')}")
     inf.linea(f"Memoria: {cfg.get('MemorySize')} MB · timeout: {cfg.get('Timeout')} s · "
@@ -213,67 +291,79 @@ def paso_lambda_publica(inf, fn):
     inf.linea(f"Rol: {enmascarar(cfg.get('Role', ''))}")
     inf.linea('Variables de entorno (solo nombres): ' + (', '.join(variables) or '(ninguna)'))
     inf.guardar_rollback('lambda-publica-configuracion.json', sin_valores(cfg))
+    return cfg
 
-    url = ro('lambda', 'get-function-url-config', '--function-name', fn, check=False)
-    if url.rc == 0:
-        u = json.loads(url.out)
-        host = u.get('FunctionUrl', '').split('//')[-1].split('/')[0]
-        inf.linea(f"Function URL: AuthType={u.get('AuthType')} · host={host}")
-    else:
+
+def paso_lambda_detalles(inf, fn):
+    url = leer('lambda', 'get-function-url-config', '--function-name', fn, ausente=('ResourceNotFoundException',))
+    if url is None:
         inf.linea('Function URL: no configurada')
+    else:
+        host = url.get('FunctionUrl', '').split('//')[-1].split('/')[0]
+        inf.linea(f"Function URL: AuthType={url.get('AuthType')} · host={host}")
 
-    pol = ro('lambda', 'get-policy', '--function-name', fn, check=False)
-    if pol.rc == 0:
-        doc = json.loads(json.loads(pol.out).get('Policy', '{}'))
-        for st in doc.get('Statement', []):
+    pol = leer('lambda', 'get-policy', '--function-name', fn, ausente=('ResourceNotFoundException',))
+    if pol is None:
+        inf.linea('Resource policy: no existe')
+    else:
+        doc = json_de(pol.get('Policy') or '{}', 'lambda', 'get-policy')
+        for st in como_lista(doc.get('Statement')):
             principal = st.get('Principal')
             resumen = principal if isinstance(principal, str) else json.dumps(principal, sort_keys=True)
             inf.linea(f"  permiso: {st.get('Sid')} · {st.get('Action')} · principal={resumen} · "
                       f"condiciones={'sí' if st.get('Condition') else 'no'}")
-    else:
-        inf.linea('Resource policy: no existe')
 
-    conc = ro('lambda', 'get-function-concurrency', '--function-name', fn, check=False)
-    inf.linea('Concurrencia reservada: ' + (str(json.loads(conc.out).get('ReservedConcurrentExecutions', 'ninguna'))
-                                             if conc.rc == 0 else 'no leída'))
+    conc = leer('lambda', 'get-function-concurrency', '--function-name', fn, vacio_ok=True)
+    inf.linea('Concurrencia reservada: ' + str(conc.get('ReservedConcurrentExecutions', 'ninguna')))
 
-    admin = ro('lambda', 'get-function-configuration', '--function-name', FN_ADMIN, check=False)
-    if admin.rc == 0:
-        inf.linea(f'Lambda admin {FN_ADMIN}: YA EXISTE (este preflight no la modifica)')
-    elif 'ResourceNotFoundException' in admin.err:
+
+def paso_lambda_admin(inf):
+    admin = leer('lambda', 'get-function-configuration', '--function-name', FN_ADMIN,
+                 ausente=('ResourceNotFoundException',))
+    if admin is None:
         inf.linea(f'Lambda admin {FN_ADMIN}: no existe (esperado antes del deploy)')
     else:
-        inf.linea(f'Lambda admin {FN_ADMIN}: no se pudo determinar')
-    return cfg
+        inf.linea(f'Lambda admin {FN_ADMIN}: YA EXISTE (este preflight no la modifica)')
+
+
+def politica_inline(inf, rol, nombre):
+    resp = leer('iam', 'get-role-policy', '--role-name', rol, '--policy-name', nombre, ausente=('NoSuchEntity',))
+    if resp is None:
+        inf.linea(f"  política '{nombre}': no existe")
+        return
+    documento = resp.get('PolicyDocument') or {}
+    inf.guardar_rollback(f'iam-{nombre}.json', documento)
+    for st in como_lista(documento.get('Statement')):
+        acciones = como_lista(st.get('Action'))
+        recursos = como_lista(st.get('Resource'))
+        inf.linea(f"  política '{nombre}': {st.get('Sid', '(sin Sid)')} · acciones: {', '.join(map(str, acciones)) or '-'}"
+                  f" · recursos: {enmascarar_recursos(' | '.join(map(str, recursos))) or '-'}")
 
 
 def paso_iam(inf, rol):
-    r = json.loads(ro('iam', 'get-role', '--role-name', rol).out).get('Role', {})
-    inf.linea(f"Rol {rol}: creado {r.get('CreateDate', '?')}")
-    adjuntas = json.loads(ro('iam', 'list-attached-role-policies', '--role-name', rol).out)
+    inf.linea(f'Rol: {rol}')
+    creado = (leer('iam', 'get-role', '--role-name', rol).get('Role') or {}).get('CreateDate', '?')
+    inf.linea(f'Creado: {creado}')
+    adjuntas = leer('iam', 'list-attached-role-policies', '--role-name', rol, vacio_ok=True).get('AttachedPolicies')
     inf.linea('Políticas administradas adjuntas: '
-              + (', '.join(p.get('PolicyName', '?') for p in adjuntas.get('AttachedPolicies', [])) or 'ninguna'))
-    nombres = json.loads(ro('iam', 'list-role-policies', '--role-name', rol).out).get('PolicyNames', [])
+              + (', '.join(p.get('PolicyName', '?') for p in como_lista(adjuntas)) or 'ninguna'))
+    nombres = leer('iam', 'list-role-policies', '--role-name', rol, vacio_ok=True).get('PolicyNames') or []
+    inf.linea('Políticas inline: ' + (', '.join(nombres) or 'ninguna'))
     for nombre in nombres:
-        doc = json.loads(ro('iam', 'get-role-policy', '--role-name', rol, '--policy-name', nombre).out)
-        documento = doc.get('PolicyDocument', {})
-        inf.guardar_rollback(f'iam-{nombre}.json', documento)
-        for st in documento.get('Statement', []):
-            acciones = st.get('Action') if isinstance(st.get('Action'), list) else [st.get('Action')]
-            recursos = st.get('Resource') if isinstance(st.get('Resource'), list) else [st.get('Resource')]
-            inf.linea(f"  política '{nombre}': {st.get('Sid', '(sin Sid)')} · {', '.join(map(str, acciones))} · "
-                      f"{enmascarar_recursos(' | '.join(map(str, recursos)))}")
+        chequeo(inf, f"política inline '{nombre}'", lambda n=nombre: politica_inline(inf, rol, n))
 
 
 def nombre_politica(tipo, pid):
     if not pid:
         return '-'
-    if tipo == 'cache':
-        r = ro('cloudfront', 'get-cache-policy', '--id', pid, check=False)
-        return json.loads(r.out).get('CachePolicy', {}).get('CachePolicyConfig', {}).get('Name', '?') if r.rc == 0 else '?'
-    r = ro('cloudfront', 'get-origin-request-policy', '--id', pid, check=False)
-    return json.loads(r.out).get('OriginRequestPolicy', {}).get('OriginRequestPolicyConfig', {}).get('Name', '?') \
-        if r.rc == 0 else '?'
+    try:
+        if tipo == 'cache':
+            d = leer('cloudfront', 'get-cache-policy', '--id', pid)
+            return d.get('CachePolicy', {}).get('CachePolicyConfig', {}).get('Name', '?')
+        d = leer('cloudfront', 'get-origin-request-policy', '--id', pid)
+        return d.get('OriginRequestPolicy', {}).get('OriginRequestPolicyConfig', {}).get('Name', '?')
+    except ErrorAws as exc:
+        return f'? ({exc.tipo})'
 
 
 def describir_behavior(inf, nombre, beh):
@@ -285,114 +375,190 @@ def describir_behavior(inf, nombre, beh):
               f"funciones={', '.join(funciones) or 'ninguna'} · métodos={(beh.get('AllowedMethods') or {}).get('Quantity')}")
 
 
+def funcion_redireccion(inf):
+    publicadas = leer('cloudfront', 'list-functions', '--stage', 'LIVE', vacio_ok=True) \
+        .get('FunctionList', {}).get('Items') or []
+    if not any(f.get('Name') == REDIRECT for f in publicadas):
+        inf.linea(f'Función {REDIRECT}: no está publicada en LIVE')
+        return
+    ruta = os.path.join(inf.out, 'rollback', f'{REDIRECT}-LIVE.js')
+    codigo = leer('cloudfront', 'get-function', '--name', REDIRECT, '--stage', 'LIVE', pos=ruta)
+    inf.linea(f"Función {REDIRECT}: publicada en LIVE · ETag={codigo.get('ETag')}")
+    if os.path.exists(ruta):
+        os.chmod(ruta, 0o600)
+        inf.linea(f'  código LIVE guardado para rollback en {ruta} (permisos 600)')
+
+
+def oac_existentes(inf):
+    oacs = leer('cloudfront', 'list-origin-access-controls', vacio_ok=True) \
+        .get('OriginAccessControlList', {}).get('Items') or []
+    inf.linea('OAC existentes: ' + (', '.join(o.get('Name', '?') for o in oacs) or 'ninguna'))
+
+
+def politicas_origen_propias(inf):
+    orps = leer('cloudfront', 'list-origin-request-policies', '--type', 'custom', vacio_ok=True) \
+        .get('OriginRequestPolicyList', {}).get('Items') or []
+    nombres = [i.get('OriginRequestPolicy', {}).get('OriginRequestPolicyConfig', {}).get('Name') for i in orps]
+    inf.linea('Políticas de origen propias: ' + (', '.join(n for n in nombres if n) or 'ninguna'))
+
+
 def paso_cloudfront(inf):
-    items = json.loads(ro('cloudfront', 'list-distributions').out).get('DistributionList', {}).get('Items', []) or []
+    items = leer('cloudfront', 'list-distributions', vacio_ok=True).get('DistributionList', {}).get('Items') or []
     sitio = [d for d in items if DOMINIO in (d.get('Aliases') or {}).get('Items', [])]
     if len(sitio) != 1:
         inf.linea(f'Distribuciones con alias {DOMINIO}: {len(sitio)} (se esperaba 1). Se omite esta parte.')
         return {}
     did = sitio[0]['Id']
-    dist = json.loads(ro('cloudfront', 'get-distribution', '--id', did).out).get('Distribution', {})
-    rc = json.loads(ro('cloudfront', 'get-distribution-config', '--id', did).out)
+    dist = leer('cloudfront', 'get-distribution', '--id', did).get('Distribution') or {}
+    rc = leer('cloudfront', 'get-distribution-config', '--id', did)
     inf.guardar_rollback('distribucion-config.json', rc)
-    cfg = rc.get('DistributionConfig', {})
+    cfg = rc.get('DistributionConfig') or {}
     inf.linea(f"Distribución {did}: status={dist.get('Status')} · ETag de configuración={rc.get('ETag')}")
-    for o in cfg.get('Origins', {}).get('Items', []):
+    for o in (cfg.get('Origins') or {}).get('Items', []):
         tipo = 'S3' if o.get('S3OriginConfig') is not None else 'custom'
         inf.linea(f"  origen {o.get('Id')} ({tipo}): {o.get('DomainName')} · OAC={o.get('OriginAccessControlId') or '-'}")
-    describir_behavior(inf, 'behavior por defecto', cfg.get('DefaultCacheBehavior', {}))
+    describir_behavior(inf, 'behavior por defecto', cfg.get('DefaultCacheBehavior') or {})
     for b in (cfg.get('CacheBehaviors') or {}).get('Items', []):
         describir_behavior(inf, f"behavior {b.get('PathPattern')}", b)
-
-    publicadas = json.loads(ro('cloudfront', 'list-functions', '--stage', 'LIVE').out) \
-        .get('FunctionList', {}).get('Items', []) or []
-    if any(f.get('Name') == REDIRECT for f in publicadas):
-        ruta = os.path.join(inf.out, 'rollback', f'{REDIRECT}-LIVE.js')
-        codigo = ro('cloudfront', 'get-function', '--name', REDIRECT, '--stage', 'LIVE', pos=ruta, check=False)
-        etag = json.loads(codigo.out).get('ETag') if codigo.rc == 0 and codigo.out.strip() else None
-        inf.linea(f'Función {REDIRECT}: publicada en LIVE · ETag={etag}')
-        if os.path.exists(ruta):
-            os.chmod(ruta, 0o600)
-            inf.linea(f'  código LIVE guardado para rollback en {ruta} (permisos 600)')
-    else:
-        inf.linea(f'Función {REDIRECT}: no está publicada en LIVE')
-
-    oacs = json.loads(ro('cloudfront', 'list-origin-access-controls').out).get('OriginAccessControlList', {}).get('Items', []) or []
-    inf.linea('OAC existentes: ' + (', '.join(o.get('Name', '?') for o in oacs) or 'ninguna'))
-    orps = json.loads(ro('cloudfront', 'list-origin-request-policies', '--type', 'custom').out) \
-        .get('OriginRequestPolicyList', {}).get('Items', []) or []
-    nombres = [i.get('OriginRequestPolicy', {}).get('OriginRequestPolicyConfig', {}).get('Name') for i in orps]
-    inf.linea('Políticas de origen propias: ' + (', '.join(n for n in nombres if n) or 'ninguna'))
+    chequeo(inf, 'función de redirección', lambda: funcion_redireccion(inf))
+    chequeo(inf, 'OAC', lambda: oac_existentes(inf))
+    chequeo(inf, 'políticas de origen', lambda: politicas_origen_propias(inf))
     return {'cfg': cfg, 'id': did}
 
 
-def paso_s3(inf, variables, origen_sitio):
-    privado = variables.get('RESENAS_BUCKET')
-    if privado:
-        inf.linea(f'Bucket privado {privado[:4]}… (nombre enmascarado en el informe)')
-        inf.linea('  versioning: ' + json.loads(ro('s3api', 'get-bucket-versioning', '--bucket', privado).out).get('Status', 'desactivado'))
-        enc = ro('s3api', 'get-bucket-encryption', '--bucket', privado, check=False)
-        algoritmo = None
-        if enc.rc == 0:
-            reglas = json.loads(enc.out).get('ServerSideEncryptionConfiguration', {}).get('Rules', [])
-            algoritmo = (reglas[0].get('ApplyServerSideEncryptionByDefault', {}) if reglas else {}).get('SSEAlgorithm')
-        inf.linea(f"  cifrado: {algoritmo or 'sin configuración'}")
-        pab = ro('s3api', 'get-public-access-block', '--bucket', privado, check=False)
-        inf.linea('  public access block: ' + (json.dumps(json.loads(pab.out).get('PublicAccessBlockConfiguration', {}), sort_keys=True)
-                                              if pab.rc == 0 else 'no configurado'))
-        lc = ro('s3api', 'get-bucket-lifecycle-configuration', '--bucket', privado, check=False)
-        reglas = json.loads(lc.out).get('Rules', []) if lc.rc == 0 else []
-        inf.guardar_rollback('lifecycle-privado.json', {'Rules': reglas})
-        inf.linea(f'  lifecycle: {len(reglas)} regla(s): ' + ', '.join(
-            f"{r.get('ID')} ({(r.get('Filter') or {}).get('Prefix', '')}, {r.get('Status')})" for r in reglas))
-        cors = ro('s3api', 'get-bucket-cors', '--bucket', privado, check=False)
-        inf.linea('  CORS: ' + ('configurado' if cors.rc == 0 else 'no configurado'))
-        pol = ro('s3api', 'get-bucket-policy', '--bucket', privado, check=False)
-        forzado = pol.rc == 0 and 'aws:SecureTransport' in json.loads(pol.out).get('Policy', '')
-        inf.linea('  bucket policy: ' + ('presente' + (' (niega tráfico sin TLS)' if forzado else '') if pol.rc == 0 else 'no presente'))
-        for prefijo in PREFIJOS:
-            lo = ro('s3api', 'list-objects-v2', '--bucket', privado, '--prefix', prefijo, '--max-keys', '1', check=False)
-            hay = lo.rc == 0 and json.loads(lo.out).get('KeyCount', 0) > 0
-            inf.linea(f"  prefijo {prefijo}: {'hay al menos un objeto' if hay else 'vacío o inexistente'}")
-    else:
-        inf.linea('RESENAS_BUCKET no está en la configuración de la Lambda: se omite el bucket privado')
+def versioning(bucket):
+    return leer('s3api', 'get-bucket-versioning', '--bucket', bucket, vacio_ok=True).get('Status', 'desactivado')
 
+
+def cifrado(inf, bucket):
+    enc = leer('s3api', 'get-bucket-encryption', '--bucket', bucket,
+               ausente=('ServerSideEncryptionConfigurationNotFoundError',))
+    reglas = ((enc or {}).get('ServerSideEncryptionConfiguration') or {}).get('Rules') or []
+    algoritmo = (reglas[0].get('ApplyServerSideEncryptionByDefault') or {}).get('SSEAlgorithm') if reglas else None
+    inf.linea(f"  cifrado: {algoritmo or 'sin configuración'}")
+
+
+def bloqueo_publico(inf, bucket):
+    pab = leer('s3api', 'get-public-access-block', '--bucket', bucket,
+               ausente=('NoSuchPublicAccessBlockConfiguration',))
+    if pab is None:
+        inf.linea('  public access block: no configurado')
+        return
+    cfg = pab.get('PublicAccessBlockConfiguration') or {}
+    claves = ('BlockPublicAcls', 'IgnorePublicAcls', 'BlockPublicPolicy', 'RestrictPublicBuckets')
+    completo = all(cfg.get(k) is True for k in claves)
+    inf.linea('  public access block: ' + ('completo' if completo else 'incompleto')
+              + ' · ' + json.dumps(cfg, sort_keys=True))
+
+
+def lifecycle(inf, bucket):
+    lc = leer('s3api', 'get-bucket-lifecycle-configuration', '--bucket', bucket,
+              ausente=('NoSuchLifecycleConfiguration',))
+    reglas = (lc or {}).get('Rules') or []
+    inf.guardar_rollback('lifecycle-privado.json', {'Rules': reglas})
+    detalle = ', '.join(f"{r.get('ID')} ({(r.get('Filter') or {}).get('Prefix', '')}, {r.get('Status')})"
+                        for r in reglas)
+    inf.linea(f'  lifecycle: {len(reglas)} regla(s)' + (f': {detalle}' if reglas else ''))
+
+
+def cors(inf, bucket):
+    c = leer('s3api', 'get-bucket-cors', '--bucket', bucket, ausente=('NoSuchCORSConfiguration',))
+    inf.linea('  CORS: ' + ('no configurado' if c is None else f"{len(c.get('CORSRules') or [])} regla(s)"))
+
+
+def politica_bucket(inf, bucket):
+    p = leer('s3api', 'get-bucket-policy', '--bucket', bucket, ausente=('NoSuchBucketPolicy',))
+    if p is None:
+        inf.linea('  bucket policy: no presente')
+        return
+    forzado = 'aws:SecureTransport' in (p.get('Policy') or '')
+    inf.linea('  bucket policy: presente' + (' (incluye la condición aws:SecureTransport)' if forzado else ''))
+
+
+def hay_objetos(bucket, prefijo):
+    """Solo sabe si el prefijo tiene al menos un objeto. No devuelve nombres de keys."""
+    r = leer('s3api', 'list-objects-v2', '--bucket', bucket, '--prefix', prefijo, '--max-keys', '1', vacio_ok=True)
+    return (r.get('KeyCount') or 0) > 0
+
+
+def bucket_privado(inf, bucket):
+    chequeo(inf, 'versioning', lambda: inf.linea('  versioning: ' + versioning(bucket)))
+    chequeo(inf, 'cifrado', lambda: cifrado(inf, bucket))
+    chequeo(inf, 'public access block', lambda: bloqueo_publico(inf, bucket))
+    chequeo(inf, 'lifecycle', lambda: lifecycle(inf, bucket))
+    chequeo(inf, 'CORS', lambda: cors(inf, bucket))
+    chequeo(inf, 'bucket policy', lambda: politica_bucket(inf, bucket))
+    for prefijo in PREFIJOS:
+        chequeo(inf, f'prefijo {prefijo}',
+                lambda p=prefijo: inf.linea(f"  prefijo {p}: {'sí' if hay_objetos(bucket, p) else 'no'}"))
+
+
+def website(inf, bucket):
+    w = leer('s3api', 'get-bucket-website', '--bucket', bucket, ausente=('NoSuchWebsiteConfiguration',))
+    inf.linea('  website: ' + ('no configurado' if w is None else 'configurado'))
+
+
+def publicas(inf, bucket):
+    r = ro('s3api', 'head-object', '--bucket', bucket, '--key', 'resenas/publicas.json', check=False)
+    if r.rc == 0:
+        inf.linea('  resenas/publicas.json: existe')
+    elif tipo_de(r.err) in ('404', 'NotFound'):
+        inf.linea('  resenas/publicas.json: no existe')
+    else:
+        raise ErrorAws('s3api', 'head-object', r.rc, tipo_de(r.err), r.err.strip()[:200])
+
+
+def bucket_sitio(inf, bucket):
+    inf.linea(f'Bucket del sitio: {bucket} (origen S3 de la distribución)')
+    chequeo(inf, 'versioning', lambda: inf.linea('  versioning: ' + versioning(bucket)))
+    chequeo(inf, 'public access block', lambda: bloqueo_publico(inf, bucket))
+    chequeo(inf, 'website', lambda: website(inf, bucket))
+    chequeo(inf, 'resenas/publicas.json', lambda: publicas(inf, bucket))
+
+
+def paso_s3(inf, variables, origen_sitio):
+    if variables is None:
+        inf.linea('Bucket privado: no se inspecciona porque no se leyó la configuración de la Lambda.')
+    elif not variables.get('RESENAS_BUCKET'):
+        inf.error('RESENAS_BUCKET: la Lambda pública no tiene esa variable; no se inspecciona el bucket privado.')
+    else:
+        privado = variables['RESENAS_BUCKET']
+        inf.linea(f'Bucket privado: {privado} (valor leído de la configuración en memoria)')
+        bucket_privado(inf, privado)
     if origen_sitio:
-        sitio = origen_sitio.split('.s3')[0]
-        inf.linea(f'Bucket del sitio: {sitio} (origen S3 de la distribución)')
-        inf.linea('  versioning: ' + json.loads(ro('s3api', 'get-bucket-versioning', '--bucket', sitio).out).get('Status', 'desactivado'))
-        pab = ro('s3api', 'get-public-access-block', '--bucket', sitio, check=False)
-        inf.linea('  public access block: ' + (json.dumps(json.loads(pab.out).get('PublicAccessBlockConfiguration', {}), sort_keys=True)
-                                              if pab.rc == 0 else 'no configurado'))
-        web = ro('s3api', 'get-bucket-website', '--bucket', sitio, check=False)
-        inf.linea('  website: ' + ('configurado' if web.rc == 0 else 'no configurado'))
-        head = ro('s3api', 'head-object', '--bucket', sitio, '--key', 'resenas/publicas.json', check=False)
-        inf.linea('  resenas/publicas.json: ' + ('existe' if head.rc == 0 else 'no existe'))
+        bucket_sitio(inf, origen_sitio.split('.s3')[0])
+    else:
+        inf.linea('Bucket del sitio: no determinado (la distribución no tiene origen S3 o no se pudo leer)')
 
 
 def paso_logs(inf):
-    grupos = json.loads(ro('logs', 'describe-log-groups', '--log-group-name-prefix', '/aws/lambda/ork3d').out).get('logGroups', [])
+    grupos = leer('logs', 'describe-log-groups', '--log-group-name-prefix', '/aws/lambda/ork3d',
+                  vacio_ok=True).get('logGroups') or []
     for g in grupos:
         inf.linea(f"Log group {g.get('logGroupName')}: retención={g.get('retentionInDays', 'sin límite')} días")
     if not grupos:
         inf.linea('Sin log groups /aws/lambda/ork3d')
 
 
+def identidad_ses(inf, identidad):
+    nombre = identidad.get('IdentityName', '')
+    mostrado = correo_enmascarado(nombre) if identidad.get('IdentityType') == 'EMAIL_ADDRESS' else nombre
+    det = leer('sesv2', 'get-email-identity', '--email-identity', nombre)
+    dkim = (det.get('DkimAttributes') or {}).get('Status', 'n/d')
+    inf.linea(f"  {identidad.get('IdentityType')} {mostrado}: verificación={identidad.get('VerificationStatus')} · DKIM={dkim}")
+
+
 def paso_ses(inf):
-    cuenta = json.loads(ro('sesv2', 'get-account').out)
-    cuota = cuenta.get('SendQuota', {})
+    cuenta = leer('sesv2', 'get-account')
+    cuota = cuenta.get('SendQuota') or {}
     inf.linea(f"SES: envío={cuenta.get('SendingEnabled')} · acceso de producción={cuenta.get('ProductionAccessEnabled')} · "
               f"enforcement={cuenta.get('EnforcementStatus')}")
     inf.linea(f"SES cuota: máximo 24 h={cuota.get('Max24HourSend')} · tasa={cuota.get('MaxSendRate')}/s · "
               f"enviados 24 h={cuota.get('SentLast24Hours')}")
-    identidades = json.loads(ro('sesv2', 'list-email-identities').out).get('EmailIdentities', []) or []
-    inf.linea(f'Identidades: {len(identidades)}')
+    identidades = leer('sesv2', 'list-email-identities', vacio_ok=True).get('EmailIdentities') or []
+    inf.linea(f'Identidades en {region()}: {len(identidades)} (SES es regional: solo se mira esta región)')
     for i in identidades:
-        nombre = i.get('IdentityName', '')
-        mostrado = correo_enmascarado(nombre) if i.get('IdentityType') == 'EMAIL_ADDRESS' else nombre
-        det = json.loads(ro('sesv2', 'get-email-identity', '--email-identity', nombre).out)
-        dkim = (det.get('DkimAttributes') or {}).get('Status', 'n/d')
-        inf.linea(f"  {i.get('IdentityType')} {mostrado}: verificación={i.get('VerificationStatus')} · DKIM={dkim}")
+        chequeo(inf, 'identidad SES', lambda i=i: identidad_ses(inf, i))
 
 
 def main(argv):
@@ -411,16 +577,21 @@ def main(argv):
         return 3
 
     try:
-        cfg = paso(inf, '2. Lambda pública V1 y Lambda admin', paso_lambda_publica, FN_PUBLICA) or {}
-        rol = (cfg.get('Role') or '').rsplit('/', 1)[-1]
+        cfg = paso(inf, '2. Lambda pública V1: configuración', paso_config_publica, FN_PUBLICA)
+        paso(inf, '3. Lambda pública V1: Function URL, permisos y concurrencia', paso_lambda_detalles, FN_PUBLICA)
+        paso(inf, '4. Lambda admin', paso_lambda_admin)
+        rol = ((cfg or {}).get('Role') or '').rsplit('/', 1)[-1]
         if rol:
-            paso(inf, '3. IAM del rol de la Lambda pública', paso_iam, rol)
-        cf = paso(inf, '4. CloudFront', paso_cloudfront) or {}
-        origen_s3 = next((o.get('DomainName') for o in (cf.get('cfg', {}).get('Origins', {}).get('Items') or [])
+            paso(inf, '5. IAM del rol de la Lambda pública', paso_iam, rol)
+        else:
+            omitido(inf, '5. IAM del rol de la Lambda pública', 'no se leyó el rol (falló la configuración de la Lambda)')
+        cf = paso(inf, '6. CloudFront', paso_cloudfront) or {}
+        origen_s3 = next((o.get('DomainName') for o in ((cf.get('cfg') or {}).get('Origins', {}).get('Items') or [])
                           if o.get('S3OriginConfig') is not None), None)
-        paso(inf, '5. S3 (bucket privado y del sitio)', paso_s3, (cfg.get('Environment') or {}).get('Variables') or {}, origen_s3)
-        paso(inf, '6. CloudWatch Logs', paso_logs)
-        paso(inf, '7. SES (solo lectura)', paso_ses)
+        variables = None if cfg is None else (cfg.get('Environment') or {}).get('Variables') or {}
+        paso(inf, '7. S3 (bucket privado y del sitio)', paso_s3, variables, origen_s3)
+        paso(inf, '8. CloudWatch Logs', paso_logs)
+        paso(inf, '9. SES (solo lectura)', paso_ses)
     except OperacionNoPermitida as exc:
         print(f'BLOQUEADO: operación no permitida en el preflight: {exc}', file=sys.stderr)
         return 3
