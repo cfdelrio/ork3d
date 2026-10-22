@@ -106,20 +106,34 @@ MAPA_SITIO = {'/': 'index.html', '/opiniones': 'opiniones.html', '/admin/entrar'
               '/admin/resenas': 'admin-web/resenas.html'}
 
 
+TIPOS_SITIO = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
+               '.json': 'application/json', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.css': 'text/css'}
+
+
 def respuesta_del_sitio(ruta):
-    """Página del sitio servida desde FAKE_SITIO_DIR (copia de lo publicado). None si la ruta no es del sitio."""
+    """Página del sitio servida desde FAKE_SITIO_DIR (copia de lo publicado). None si la ruta no es del sitio.
+
+    Como el origen de CloudFront: /opinar/<token> sirve opinar.html; una ruta sin extensión prueba con .html; una
+    ruta que no existe responde la página de error del sitio con 404 (sin formato de la API).
+    """
     carpeta = os.environ.get('FAKE_SITIO_DIR', '')
-    if not carpeta or not (ruta in MAPA_SITIO or ruta.startswith('/assets/js/')):
+    if not carpeta or ruta.startswith('/admin/api/'):
         return None
-    relativa = MAPA_SITIO.get(ruta, ruta.lstrip('/'))
-    origen = os.path.join(carpeta, relativa)
-    if not os.path.isfile(origen):
-        return '404', b'<html>pagina no encontrada</html>', {'content-type': 'text/html', 'x-cache': 'Error from cloudfront'}
+    if ruta.startswith('/opinar/'):
+        base = 'opinar.html'
+    else:
+        base = MAPA_SITIO.get(ruta, ruta.lstrip('/') or 'index.html')
+    candidatos = [base] if os.path.splitext(base)[1] else [base, base + '.html']
+    origen = next((os.path.join(carpeta, c) for c in candidatos if os.path.isfile(os.path.join(carpeta, c))), None)
+    if origen is None:
+        return '404', b'<html>pagina no encontrada</html>', {'content-type': 'text/html; charset=utf-8',
+                                                             'server': 'AmazonS3', 'x-cache': 'Error from cloudfront'}
     with open(origen, 'rb') as f:
         contenido = f.read()
+    relativa = os.path.relpath(origen, carpeta)
     cache = 'no-store, max-age=0' if relativa.startswith(('admin-web/', 'assets/js/admin')) else 'max-age=60'
-    return '200', contenido, {'content-type': 'text/html; charset=utf-8', 'cache-control': cache,
-                              'x-cache': 'Miss from cloudfront'}
+    tipo = TIPOS_SITIO.get(os.path.splitext(origen)[1], 'application/octet-stream')
+    return '200', contenido, {'content-type': tipo, 'cache-control': cache, 'x-cache': 'Miss from cloudfront'}
 
 
 def main():

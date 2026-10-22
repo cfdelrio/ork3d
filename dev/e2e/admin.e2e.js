@@ -293,6 +293,7 @@ caso('login: pedir el enlace, confirmarlo desde el correo y entrar al panel', as
     esperar(await p.locator('#confirmar-acceso').isEnabled(), 'con código, el botón debe estar habilitado');
     esperar(!p.url().includes('#c='), `el código debe salir de la URL: ${p.url()}`);
     esperar(pedidosA(s, 'POST', '/sesion/confirmar').length === 0, 'cargar la página no debe confirmar el acceso');
+    esperar(!(await p.content()).includes(codigo), 'el código no debe quedar en el DOM');
 
     await p.click('#confirmar-acceso');
     await p.waitForURL(`${BASE}/admin/resenas`);
@@ -304,6 +305,11 @@ caso('login: pedir el enlace, confirmarlo desde el correo y entrar al panel', as
       `cookie de sesión: ${JSON.stringify(cookie)}`);
     const ochoHoras = 8 * 60 * 60 * 1000;
     esperar(Math.abs(cookie.expires * 1000 - Date.now() - ochoHoras) < 5 * 60 * 1000, 'la sesión dura 8 h');
+    // HttpOnly: JavaScript no puede leerla. Y el acceso no guarda nada en el almacenamiento del navegador.
+    const legible = await p.evaluate(() => document.cookie);
+    esperar(!legible.includes('ork3d_admin'), 'la cookie de sesión no debe ser legible desde JavaScript');
+    const almacenado = await p.evaluate(() => ({ local: localStorage.length, sesion: sessionStorage.length }));
+    esperar(almacenado.local === 0 && almacenado.sesion === 0, 'el acceso no guarda nada en el navegador');
 
     estadoSesion = await s.ctx.storageState();
     codigoLogin = codigo;

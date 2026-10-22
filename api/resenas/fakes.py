@@ -11,6 +11,7 @@ Implementa el subconjunto que usa app.py y se comporta como S3 en lo que importa
 Los errores son FakeClientError: exponen .response igual que botocore.ClientError.
 """
 import re
+import threading
 
 _RANGO = re.compile(r'bytes=(\d+)-(\d+)')
 
@@ -34,6 +35,9 @@ class _Body:
 
 class FakeS3:
     def __init__(self):
+        # S3 resuelve cada escritura condicional de forma atómica: la comprobación y la escritura son una sola
+        # operación. El fake lo modela con un candado; sin él, una prueba con hilos no dice nada.
+        self._atomico = threading.Lock()
         self.objects = {}    # clave -> bytes
         self.metadatos = {}  # clave -> {'ContentType', 'CacheControl'}
         self.presigned = {}  # clave -> {'fields', 'conditions', 'expires_in'}
@@ -61,6 +65,10 @@ class FakeS3:
 
     def put_object(self, Bucket, Key, Body=b'', ContentType=None, IfNoneMatch=None,
                    IfMatch=None, CacheControl=None, **_):
+        with self._atomico:
+            return self._put_object(Bucket, Key, Body, ContentType, IfNoneMatch, IfMatch, CacheControl)
+
+    def _put_object(self, Bucket, Key, Body, ContentType, IfNoneMatch, IfMatch, CacheControl):
         self._registrar('put_object', Key)
         if IfNoneMatch not in (None, '*'):
             raise NotImplementedError('el fake solo modela IfNoneMatch="*"')

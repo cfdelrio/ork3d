@@ -751,3 +751,112 @@ Pruebas (Chromium real, API simulada en el navegador, cada POST contado):
 
 Límites: la prueba de geometría usa una reseña de tamaño fijo. Con comentarios más largos la posición de los botones
 cambia, por eso la corrección no depende de la geometría: el plazo actúa aunque el segundo clic caiga en Confirmar.
+
+### 18. Controles de cierre de V2 admin
+
+Auditoría del 22/10/2026 sobre `b63fcb2` más los commits de esta sección. Cada control tiene un test automático. Los
+que dependen de AWS real o de un correo humano figuran como pendientes, no como validados.
+
+**Magic link y sesión** (`api/resenas/nucleo/sesion.py`, `admin_app.py`):
+
+- Transición: `solicitar` crea `admin/logins/<sha256>.json` (vence a los 10 min). `confirmar` consume el código con
+  una escritura condicional `If-None-Match: *` sobre `admin/logins-usados/<sha256>.json`: la que gana crea la marca y
+  la sesión; las demás reciben `ErrorConflicto` y responden 401 uniforme. Después se crea `admin/sesiones/<sha256>.json`
+  (8 h desde su creación) y la cookie.
+- La decisión de "quién gana" la toma la escritura condicional, no la lectura previa: `leer → comprobar → escribir`
+  no se usa para el consumo (test `test_el_consumo_decide_con_escritura_condicional`).
+- Replay: 401 idéntico al de un código inexistente o vencido, sin cookie, sin sesión nueva y sin tocar la sesión que
+  ya existe (`MagicLinkTest`).
+- Concurrencia: 2 y 10 consumos simultáneos del mismo código: exactamente un ganador (`ConcurrenciaLoginTest`).
+  Control negativo: el patrón `leer → comprobar → escribir` produce dos ganadores con el mismo arnés. Sin ese control
+  la prueba no sería concluyente.
+- Sesión: válida hasta el instante de vencimiento exclusivo (8 h exactas es inválida). Leer no renueva
+  (`SesionVentanaTest`). Cookies malformadas, vacías o con caracteres raros: 401 sin escribir nada.
+- Logout: `POST /admin/api/sesion/cerrar` borra el registro en el servidor y responde `Set-Cookie` con
+  `Max-Age=0`, mismo nombre, `Path=/admin` y atributos. Después, la cookie vieja da 401. El segundo cierre da 401 sin
+  cookies (`LogoutTest`).
+
+**Cookie** (contrato exacto, `CookieContratoTest` y E2E en Chromium):
+
+```
+ork3d_admin=<secreto 43 caracteres>; HttpOnly; Secure; SameSite=Lax; Path=/admin; Max-Age=28800
+```
+
+- Nombre del código: `_sesion.COOKIE = 'ork3d_admin'`. Emisión única: `admin_app._confirmar`. Expiración única:
+  `admin_app._cerrar`. La API pública (`app.py`) no lee ni emite la cookie.
+- Sin `Domain`, sin `Expires` (se usa `Max-Age`), `SameSite=Lax` (no `Strict` ni `None`).
+- Chromium real (`dev/e2e/admin.e2e.js`): la cookie llega con `httpOnly`, `secure`, `path=/admin`, `sameSite=Lax` y
+  vence en 8 h (±5 min). `document.cookie` no la incluye. El almacenamiento del navegador queda vacío. El código no
+  queda en el DOM ni en la URL.
+
+**CSRF** (`CsrfMatrizTest`): en las mutaciones con sesión, el orden es sesión → CSRF → lógica (`_exigir_sesion`,
+`_csrf`). Origin ausente o distinto, `X-Admin-Request` ausente o distinto de `1`, y `Content-Type` distinto de JSON
+dan 400 sin efectos. Sin sesión, 401. Con sesión y forma válida, la mutación pasa. Ninguna respuesta de CSRF es 403.
+Motivo: CloudFront reescribe los 403 de la distribución (§16.7).
+
+**Logs** (`LogsSinSecretosTest`, `test_privacidad`): un flujo completo (login, replay, invitación, moderación, export,
+logout) no deja en el registro el código, el token, el secreto de la sesión, la cookie, el correo, el contacto, el
+feedback privado ni el pedido. Todos los campos están en la allowlist. El sanitizador descarta además cualquier valor
+con forma de token en cualquier campo (ver "Defectos corregidos").
+
+**Defectos corregidos en esta auditoría** (cada uno con su commit y su test):
+
+1. `bc58135` — el sanitizador de logs dejaba pasar un valor de forma de token en los campos permitidos. Ningún punto de
+   llamada lo hace hoy: es defensa en profundidad de la garantía documentada.
+2. `a04d96b` — un registro de sesión o de login corrupto respondía 500 en vez de 401. No es explotable (la clave es el
+   hash del secreto y el atacante no puede escribir en `admin/sesiones/`), pero rompía el contrato.
+
+**Cobertura V1** (sin datos productivos): tokens (válido, desconocido, vencido, revocado, usado), claim sin reuse,
+envío concurrente con un solo ganador, validaciones, permiso de publicación, foto opcional, presign acotado al path
+esperado y cuerpo JSON. Están en `test_app.py`, `test_nucleo.py`, `test_contrato.py` y `test_privacidad.py`.
+
+**Export público** (`test_privacidad`, `test_export_publicado_tiene_exactamente_la_allowlist`): exactamente
+`id, rating, comment, aspects, display_name, category, product_label, verified, photo_url, published_at`. Sin
+`token_hash`, `contact`, `private_feedback`, `order_ref`, correos ni claves privadas.
+
+**Fotos**: privada `pendientes/<token_hash>/<uuid>.jpg`, pública `resenas/fotos/<review_id>.jpg`. Aprobar copia la foto
+(`test_aprobar_con_foto_copia_los_bytes_solo_al_sitio`). Rechazar o ocultar retira la pública y la saca del export
+(`test_rechazar_aprobada_retira_foto...`, `test_ocultar_aprobada_retira_foto...`). Restaurar la repone.
+
+**Notificaciones (solo auditoría; no se activó nada)**:
+
+- Flag: `RESENAS_NOTIFY_ENABLED`, por defecto `false` (`app.py`). Con el flag encendido, `Service` necesita correo,
+  `base_url`, origen y destino; si falta alguno, no notifica.
+- Destinatario: `RESENAS_ADMIN_EMAIL`, el moderador. Remitente: `RESENAS_FROM_EMAIL`. Contenido (allowlist en
+  `nucleo/correo.py`): estrellas, nombre mostrado, producto, categoría, comentario público truncado a 280 caracteres,
+  si tiene foto y el enlace al panel. No incluye el pedido, el feedback privado ni el contacto (`test_correo`).
+- Fallo de SES: `notificar_resena` nunca levanta y el hook del submit lo envuelve. La reseña ya guardada no se
+  revierte ni se libera el token (`test_fallo_de_ses_no_revierte_ni_la_reseña_ni_el_claim`).
+- Valor real del flag en la Lambda pública: **no verificado desde este entorno** (sin AWS). Lo comprueba
+  `infra/prod-lectura-v2.sh` con una lectura.
+
+**Verificación de lectura de producción** (`infra/prod-lectura-v2.sh`): solo GET y una lectura de AWS. Comprueba
+`/`, `/opiniones` (accesible, `noindex, follow`, no enlazada desde home, fuera del sitemap), `/opinar/<token
+inexistente>`, `www` → apex, `/admin/resenas` y `/admin/entrar`, la API sin cookie (401), el export (allowlist) y
+cada foto publicada (200 `image/jpeg`), y el flag de notificaciones. No escribe nada. Probado con el simulador y el
+sitio real del repo (`infra/tests/test_prod_lectura.py`).
+
+**Pendientes y riesgos abiertos**:
+
+- La escritura condicional de S3 (`If-None-Match: *`) se verifica en tests con el fake, que modela la atomicidad con un
+  candado. En producción, el replay y la concurrencia no se pueden probar sin un código real, y los códigos llegan por
+  correo.
+- Una sesión nueva no revoca las sesiones previas: cada una vence por su cuenta a las 8 h. El logout revoca solo la
+  sesión actual. Es el diseño actual; cambiarlo exige decidir si se acepta la sesión en varios dispositivos.
+- `confirmar` no tiene límite propio. El código tiene 256 bits de entropía, así que no hay fuerza bruta viable; el
+  límite de solicitudes (3 cada 15 min) sigue en `solicitar`.
+- `admin/logins/` no se borra al consumir: la marca de uso alcanza. Ambos registros los limpia la regla de ciclo de
+  vida de `admin/` a los 2 días.
+- Todo lo que depende de AWS real (flag de la Lambda, cookie en el navegador del operador, logs de CloudWatch) queda
+  para la verificación humana o de EC2 de abajo.
+
+**Verificación humana (una sola)**: con la sesión abierta en `https://ork3d.com/admin/resenas`, abrir DevTools (F12) →
+pestaña *Application* → *Cookies* → `https://ork3d.com` → fila `ork3d_admin`. Mirar solo las columnas *HttpOnly*,
+*Secure*, *SameSite*, *Path* y *Expires* (debe quedar unas 8 h después del login). No copiar el valor.
+
+**Lectura en EC2 (read-only)**:
+
+```bash
+cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
+  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr && infra/prod-lectura-v2.sh
+```
