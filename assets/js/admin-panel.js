@@ -19,6 +19,10 @@
   // Rechazos de cabeceras CSRF de la API: 400 con estos códigos (V2-ADMIN.md §5 y §16.8). El 403 de versiones
   // anteriores de la API se trata igual.
   var CSRF_ERRORES = ['origen', 'csrf', 'content_type'];
+  // Plazo antes de que "Confirmar" acepte un clic tras abrir el diálogo. El segundo clic de un doble clic sobre
+  // el botón que abrió el diálogo puede caer en "Confirmar" (pantallas angostas): sin este plazo, aprobaba sin que
+  // nadie confirmara. Ver V2-ADMIN.md §17.
+  var ESPERA_CONFIRMAR_MS = 800;
   var EXITO = {
     aprobar: 'Reseña aprobada.',
     rechazar: 'Reseña rechazada.',
@@ -31,6 +35,7 @@
   var ui = {
     ocupado: false,
     confirmacion: null,
+    turnoConfirmacion: 0,
     pestana: 'pending',
     solicitudBandeja: 0
   };
@@ -666,6 +671,16 @@
     $('dialogo-titulo').textContent = titulo;
     $('dialogo-texto').textContent = detalle || '';
     ui.confirmacion = alConfirmar;
+    // Confirmar queda deshabilitado un instante. Cada apertura invalida el temporizador de la anterior.
+    var confirmar = $('dialogo-confirmar');
+    confirmar.disabled = true;
+    ui.turnoConfirmacion += 1;
+    var turno = ui.turnoConfirmacion;
+    window.setTimeout(function () {
+      if (turno === ui.turnoConfirmacion) {
+        confirmar.disabled = false;
+      }
+    }, ESPERA_CONFIRMAR_MS);
     var dialogo = $('dialogo');
     if (typeof dialogo.showModal === 'function') {
       dialogo.showModal();

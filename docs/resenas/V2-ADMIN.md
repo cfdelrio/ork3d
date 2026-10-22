@@ -703,3 +703,51 @@ Demostración: con el script de `582405a` y el simulador nuevo, la corrida regis
 `cloudfront update-function if-match=E-LIVE-0` y falla con `PreconditionFailed`. Con el script actual envía
 `if-match=E-DEV-0`. Las pruebas `test_update_usa_etag_de_development_y_nunca_el_de_live` y
 `test_publish_usa_el_etag_de_development_vigente` fallan con el script anterior.
+
+### 17. Moderación: acciones explícitas (investigación de la aprobación accidental)
+
+Hallazgo: la reseña de smoke `633729550934477689fafb8f576dd851` pasó de `pending` a `approved` por un `POST …/aprobar`
+autenticado, dos minutos después de creada, sin que se recuerde haberlo pedido. El backend hizo lo correcto (creó la
+reseña como `pending` y cambió solo con la operación `aprobar`).
+
+Inventario de caminos desde la interacción hasta `POST /admin/api/resenas/{id}/aprobar` (`assets/js/admin-panel.js`):
+
+1. Único camino: clic (o Enter/Espacio) sobre el botón `[data-accion="aprobar"]` de `#acciones-detalle` → se abre
+   `#dialogo` con el callback `ejecutarAccion(id, aprobar)` → clic (o Enter) sobre `#dialogo-confirmar` → `ejecutarAccion`
+   → `A.llamar('POST', '/resenas/{id}/aprobar')`.
+2. Ningún otro. `ejecutarAccion` tiene dos llamadas: la de las acciones con `confirmar: false` (restaurar,
+   reenviar aviso) y la del callback del diálogo. `aprobar` tiene `confirmar: true`, así que solo sale por el diálogo.
+3. Carga del panel, render, detalle, refresco, navegación atrás y adelante, filtros de pestañas y el enlace "Ver"
+   (`<a href>`, navegación normal): cero POST. Verificado en Chromium real (`dev/e2e/admin-moderacion.e2e.js`).
+4. Ningún `<form>` contiene botones de moderación. Los botones tienen `type="button"` explícito. El único formulario
+   (`#form-invitacion`) tiene `preventDefault` y solo crea invitaciones. No hay delegación de eventos sobre las acciones.
+
+Riesgo real encontrado (reproducido): un doble clic sobre "Aprobar" abre el diálogo con el primer clic. En pantallas
+angostas el segundo clic cae en "Confirmar" y aprueba sin confirmación. Barrido de 40 geometrías (anchos 360 a 1280,
+alturas 420 a 900), reseña fija: 4 reproducen la aprobación (anchos 360 y 390, alturas 420 y 480). Antes del fix, la
+prueba de regresión falla en esa geometría.
+
+Corrección: al abrirse el diálogo, "Confirmar" queda deshabilitado 800 ms (`ESPERA_CONFIRMAR_MS`). Cada apertura
+invalida el temporizador de la anterior. Con eso, un doble clic no llega a confirmar en ninguna geometría (barrido
+posterior: 0 de 40). Confirmar sigue exigiendo un clic o una tecla explícita después del plazo. No se agregó un paso
+extra de confirmación: el diálogo ya existía y el plazo lo protege sin fricción.
+
+Lo que no se puede demostrar: si la aprobación de la reseña de smoke fue un clic deliberado o el segundo clic de un
+doble clic. El backend registra `ev=moderacion, review_id, op, estado, resultado` y la hora de CloudWatch, pero no
+distingue el tipo de interacción. No se cambió el backend.
+
+Pruebas (Chromium real, API simulada en el navegador, cada POST contado):
+
+- Lectura: cargar, filtrar, abrir "Ver", recargar, atrás y adelante, renderizar cada estado: cero mutaciones.
+- Aprobar: cancelar o Escape: cero. Un clic explícito en Confirmar: exactamente una.
+- Doble clic sobre Aprobar en la geometría de riesgo: cero, con el diálogo abierto (precondición verificada: el segundo
+  clic cae en Confirmar).
+- Un clic o doble clic sobre Confirmar al abrirse el diálogo (aprobar, rechazar, ocultar): cero.
+- Confirmar deshabilitado al abrirse y habilitado después del plazo.
+- Doble clic sobre Confirmar tras el plazo: como máximo una mutación.
+- Restaurar y reenviar aviso (sin diálogo): un doble clic envía como máximo una vez.
+- Teclado: Enter en Aprobar y Enter en Cancelar no aprueban; Enter en Confirmar tras el plazo aprueba una vez.
+- E2E existente del panel: 28 de 28.
+
+Límites: la prueba de geometría usa una reseña de tamaño fijo. Con comentarios más largos la posición de los botones
+cambia, por eso la corrección no depende de la geometría: el plazo actúa aunque el segundo clic caiga en Confirmar.
