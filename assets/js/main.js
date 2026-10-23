@@ -262,10 +262,79 @@
     for (var j = 0; j < items.length; j++) io.observe(items[j]);
   }
 
+  // ── Foto ampliada (sección "piezas") ──────────────────────────────────
+  // Progressive enhancement: cada foto queda dentro de un botón que abre un <dialog> a pantalla completa. Si el
+  // navegador no soporta showModal, no se cambia nada. La imagen ampliada es el src que ya usa el mosaico (la
+  // variante más grande publicada): no se pide ningún recurso nuevo.
+  function setupPhotoLightbox() {
+    var dialogo = document.createElement('dialog');
+    if (typeof dialogo.showModal !== 'function') return;
+    var figuras = document.querySelectorAll('#piezas .mosaic__item');
+    if (!figuras.length) return;
+
+    dialogo.className = 'lightbox';
+    dialogo.setAttribute('aria-label', 'Foto ampliada');
+    var cerrar = document.createElement('button');
+    cerrar.type = 'button';
+    cerrar.className = 'lightbox__close';
+    cerrar.setAttribute('aria-label', 'Cerrar foto ampliada');
+    cerrar.textContent = '\u00d7';
+    var ampliada = document.createElement('img');
+    ampliada.decoding = 'async';
+    var pie = document.createElement('p');
+    pie.className = 'lightbox__caption';
+    dialogo.appendChild(cerrar);
+    dialogo.appendChild(ampliada);
+    dialogo.appendChild(pie);
+    document.body.appendChild(dialogo);
+
+    for (var i = 0; i < figuras.length; i++) {
+      (function (figura) {
+        var picture = figura.querySelector('picture');
+        var img = picture && picture.querySelector('img');
+        if (!img) return;
+        var boton = document.createElement('button');
+        boton.type = 'button';
+        boton.className = 'mosaic__zoom';
+        boton.setAttribute('aria-haspopup', 'dialog');
+        boton.setAttribute('aria-label', 'Ampliar foto: ' + img.alt);
+        picture.parentNode.insertBefore(boton, picture);
+        boton.appendChild(picture);
+        boton.addEventListener('click', function () {
+          ampliada.src = img.getAttribute('src');
+          ampliada.alt = img.alt;
+          // Proporción de la foto (atributos width/height del markup): para escalarla a la pantalla sin deformarla.
+          var ancho = parseFloat(img.getAttribute('width')) || 1;
+          var alto = parseFloat(img.getAttribute('height')) || 1;
+          ampliada.style.setProperty('--ratio', String(ancho / alto));
+          pie.textContent = img.alt;
+          document.documentElement.classList.add('is-lightbox-open');
+          dialogo.showModal();
+        });
+      })(figuras[i]);
+    }
+
+    cerrar.addEventListener('click', function () { dialogo.close(); });
+    // El único control enfocable es el botón de cierre: Tab no debe sacar el foco del diálogo.
+    dialogo.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        cerrar.focus();
+      }
+    });
+    // Clic en el fondo (el propio dialog, no la foto) cierra. Escape lo cierra el navegador.
+    dialogo.addEventListener('click', function (e) { if (e.target === dialogo) dialogo.close(); });
+    dialogo.addEventListener('close', function () {
+      document.documentElement.classList.remove('is-lightbox-open');
+      ampliada.removeAttribute('src');
+    });
+  }
+
   // ── Init ────────────────────────────────────────────────────────────────
   wireWaLinks();
   wireProductCards();
   setupReveal();
+  setupPhotoLightbox();
   setupDeadlineCta();
   setupGiftQuoteForm();
   setupGiftPageAnalytics();

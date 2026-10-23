@@ -78,6 +78,9 @@ class TooingOpinionesDesdeMainTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         origen = os.path.join(self.tmp, 'origin.git')
         subprocess.run(['git', 'clone', '--bare', '-q', RAIZ, origen], check=True, capture_output=True)
+        # El origen de prueba es main, sin importar la rama que esté activa en el checkout de desarrollo.
+        subprocess.run(['git', '--git-dir', origen, 'symbolic-ref', 'HEAD', 'refs/heads/main'], check=True,
+                       capture_output=True)
         self.clon = os.path.join(self.tmp, 'clon')
         subprocess.run(['git', 'clone', '-q', origen, self.clon], check=True, capture_output=True)
         self.rama = subprocess.run(['git', '-C', self.clon, 'rev-parse', '--abbrev-ref', 'HEAD'],
