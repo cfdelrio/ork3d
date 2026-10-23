@@ -93,7 +93,7 @@ async function abrirConBoton(p, indice) {
 caso('cada foto del mosaico es un botón con nombre accesible', async (browser) => {
   const { ctx, page, errores } = await abrirHome(browser, 1280);
   try {
-    afirmar(await botones(page).count() === 3, `se esperaban 3 botones, hay ${await botones(page).count()}`);
+    afirmar(await botones(page).count() === 8, `se esperaban 8 botones (3 del mosaico + 5 de la galería), hay ${await botones(page).count()}`);
     const nombres = await botones(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
     for (const n of nombres) afirmar(n && n.startsWith('Ampliar foto: '), `nombre accesible inesperado: ${n}`);
     afirmar(errores.length === 0, errores.join(' | '));
@@ -181,6 +181,68 @@ caso('teclado: Enter abre la foto de su botón y Tab no sale del diálogo', asyn
     await page.keyboard.press('Shift+Tab');
     afirmar(await page.evaluate(() => document.querySelector('dialog.lightbox').contains(document.activeElement)),
       'Shift+Tab sacó el foco del diálogo');
+    afirmar(errores.length === 0, errores.join(' | '));
+  } finally {
+    await ctx.close();
+  }
+});
+
+caso('la galería muestra las cinco piezas nuevas, cargadas, y cada una se amplía', async (browser) => {
+  const { ctx, page, errores } = await abrirHome(browser, 1280);
+  try {
+    const galeria = page.locator('.piezas__galeria');
+    await galeria.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => [...document.querySelectorAll('.piezas__galeria img')]
+      .every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 15000 });
+    afirmar(await galeria.locator('img').count() === 5, 'la galería debe tener 5 fotos');
+    const esperadas = [
+      '/assets/img/fotos/piezas-serie-medlog-800.webp',
+      '/assets/img/fotos/piezas-personalizado-lego-800.webp',
+      '/assets/img/fotos/piezas-escudos-800.webp',
+      '/assets/img/fotos/piezas-camiseta-40-800.webp',
+      '/assets/img/fotos/piezas-goma-800.webp',
+    ];
+    for (let i = 0; i < esperadas.length; i++) {
+      const src = await galeria.locator('img').nth(i).getAttribute('src');
+      afirmar(src === esperadas[i], `foto ${i + 1} de la galería: ${src}`);
+      await galeria.locator('.mosaic__zoom').nth(i).click();
+      await page.waitForFunction(() => {
+        const d = document.querySelector('dialog.lightbox');
+        return d && d.open;
+      });
+      afirmar((await page.locator('dialog.lightbox img').getAttribute('src')) === esperadas[i],
+        `el lightbox debe abrir la foto ${i + 1} de la galería`);
+      await page.keyboard.press('Escape');
+    }
+    await galeria.screenshot({ path: path.join(SHOTS, 'galeria-1280.png') });
+    afirmar(errores.length === 0, errores.join(' | '));
+  } finally {
+    await ctx.close();
+  }
+});
+
+caso('la galería se acomoda en 2 columnas en móvil, 3 en tablet y 5 en escritorio', async (browser) => {
+  for (const [ancho, esperadas] of [[375, 2], [800, 3], [1280, 5]]) {
+    const { ctx, page, errores } = await abrirHome(browser, ancho);
+    try {
+      const columnas = await page.evaluate(() => new Set(
+        [...document.querySelectorAll('.piezas__galeria .mosaic__item')]
+          .map((e) => Math.round(e.getBoundingClientRect().left))).size);
+      afirmar(columnas === esperadas, `${ancho} px: ${columnas} columnas, se esperaban ${esperadas}`);
+      afirmar(errores.length === 0, errores.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  }
+});
+
+caso('la galería no genera desborde horizontal en móvil', async (browser) => {
+  const { ctx, page, errores } = await abrirHome(browser, 375);
+  try {
+    await page.locator('.piezas__galeria').scrollIntoViewIfNeeded();
+    const d = await page.evaluate(() => ({ visible: document.documentElement.clientWidth, total: document.documentElement.scrollWidth }));
+    afirmar(d.total <= d.visible, `desborde horizontal de ${d.total - d.visible}px en 375 px`);
+    await page.locator('#piezas').screenshot({ path: path.join(SHOTS, 'piezas-375.png') });
     afirmar(errores.length === 0, errores.join(' | '));
   } finally {
     await ctx.close();

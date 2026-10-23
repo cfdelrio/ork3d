@@ -1922,6 +1922,21 @@ html.js [data-reveal].is-in {
 }
 .lightbox__close:focus-visible { outline: 2px solid var(--color-lime); outline-offset: 3px; }
 html.is-lightbox-open { overflow: hidden; }
+/* Galería de piezas debajo del mosaico: mismo lightbox, tarjetas de igual alto (recorte 4:5). */
+.piezas__galeria {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 40px;
+}
+@media (min-width: 640px) {
+  .piezas__galeria { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+}
+@media (min-width: 1100px) {
+  .piezas__galeria { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 56px; }
+}
+.mosaic__item--galeria { max-width: none; }
+.mosaic__item--galeria img { aspect-ratio: 4 / 5; object-fit: cover; }
 .mosaic__label { margin: 14px 0 0; color: var(--text-dim); }
 .mosaic__head {
   display: flex;
