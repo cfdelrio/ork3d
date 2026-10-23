@@ -37,6 +37,7 @@ capa "Browser E2E UX del panel admin: desborde, objetivos de 44 px, contraste, f
 capa "Browser capturas del panel admin: sin errores de página en los estados visuales (Chromium)" env PREFIJO=suite node dev/e2e/admin-visual.e2e.js
 capa "Browser E2E /opiniones: estados, SEO, móvil, accesibilidad y contraste (Chromium)" node dev/e2e/opiniones.e2e.js
 capa "Browser E2E foto ampliada en la home: pantalla completa, teclado, cierre y fallback (Chromium)" node dev/e2e/lightbox.e2e.js
+capa "Browser E2E caso real en regalos: video silenciado, reproducción única, reducción de movimiento, CLS y responsive (Chromium)" node dev/e2e/caso-real.e2e.js
 capa "Validaciones HTML/JS/shell/JSON/IAM" python3 dev/validar.py
 
 rm -rf api/resenas/__pycache__ api/resenas/nucleo/__pycache__ dev/__pycache__ admin/tests/__pycache__ infra/tests/__pycache__
