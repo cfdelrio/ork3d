@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/assets/css/styles.css?v=16" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=17" />
 
 <script type="application/ld+json">
 {
@@ -458,28 +458,42 @@
   </div>
 </section>
 
-<!-- EMPRESAS -->
-<section class="section theme-lila" id="empresas">
-  <div class="container">
-    <h2 class="section__title section__title--center" data-reveal>
-      Reconocimientos que hablan <span class="ul">de tu empresa</span>
-    </h2>
-    <p class="section__lead">
-      Fabricamos piezas para celebrar logros, aniversarios, hitos y personas — con la identidad de tu empresa. Desde reconocimientos individuales hasta kits para equipos.
-    </p>
-    <div class="empresas">
-      <div class="empresas__tile" aria-hidden="true" data-reveal>
-        <img src="/assets/img/p-empresarial.svg?v=2" alt="" loading="lazy" width="520" height="520"/>
+<!-- EMPRESAS: caso real de reconocimiento empresarial. Reutiliza el video y las clases de /regalos-empresariales-fin-de-ano.
+     Reemplaza la lista genérica de productos, que ya aparece en #productos. -->
+<section class="section theme-lila caso-real" id="empresas" aria-labelledby="empresas-titulo">
+  <div class="container caso-real__grid">
+    <figure class="caso-real__figura">
+      <div class="caso-real__marco">
+        <video class="caso-real__video" width="464" height="832" muted playsinline controls preload="none" poster="/assets/img/caso-real/reconocimiento-empresarial-poster.webp" data-caso-video aria-label="Pieza real de reconocimiento empresarial: cuadro negro con un micrófono dorado y el texto SOY CAPAZ.">
+          <source src="/assets/video/caso-real/reconocimiento-empresarial.webm" type="video/webm" />
+          <source src="/assets/video/caso-real/reconocimiento-empresarial.mp4" type="video/mp4" />
+          Tu navegador no puede reproducir este video.
+        </video>
       </div>
-      <ol class="index-list" data-reveal>
-        <li><span>01</span>Trofeos deportivos</li>
-        <li><span>02</span>Medallas personalizadas</li>
-        <li><span>03</span>Llaveros de club</li>
-        <li><span>04</span>Logos 3D</li>
-        <li><span>05</span>Soportes para escritorio</li>
-        <li><span>06</span>Merchandising para marcas</li>
-        <li><span>07</span>Piezas funcionales a medida</li>
-      </ol>
+      <figcaption class="caso-real__pie">
+        <span class="caso-real__pie-titulo">Reconocimiento empresarial personalizado</span>
+        <span class="caso-real__pie-sub">Diseñado para una persona. Escalable a todo tu equipo.</span>
+      </figcaption>
+    </figure>
+
+    <div class="caso-real__texto">
+      <p class="caso-real__eyebrow">PROYECTO REAL · RECONOCIMIENTO EMPRESARIAL</p>
+      <h2 class="caso-real__titulo" id="empresas-titulo">Un logro merece algo diseñado especialmente para quien lo consiguió.</h2>
+      <p class="caso-real__lead">Diseñamos este reconocimiento combinando la identidad de la empresa con la historia de una persona.</p>
+      <p class="caso-real__detalle">Cada pieza puede llevar:</p>
+      <ul class="caso-real__chips" aria-label="Elementos personalizables">
+        <li>Nombre</li>
+        <li>Mensaje</li>
+        <li>Colores</li>
+        <li>Identidad de marca</li>
+        <li>Símbolos del logro</li>
+      </ul>
+      <p class="caso-real__cierre">Una pieza única. Una misma idea que puede escalar a todo tu equipo.</p>
+      <p class="caso-real__micro">Contanos a quién querés reconocer y para cuántas personas.</p>
+      <div class="caso-real__acciones">
+        <a href="#" class="btn btn--primary btn--lg" data-wa data-wa-source="caso_real_home" data-wa-msg="Hola, quiero pedir una propuesta de reconocimiento empresarial personalizado en ORK3D.">Pedir una propuesta</a>
+        <a href="/regalos-empresariales-fin-de-ano" class="btn btn--ghost btn--lg">Ver soluciones para empresas</a>
+      </div>
     </div>
   </div>
 </section>
@@ -540,6 +554,6 @@
 </a>
 
 <script src="/config.js"></script>
-<script src="/assets/js/main.js?v=3"></script>
+<script src="/assets/js/main.js?v=4"></script>
 </body>
 </html>
