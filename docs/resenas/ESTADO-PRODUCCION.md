@@ -1,6 +1,6 @@
 # Reseñas V2 · estado de producción y comandos vigentes
 
-**Rama canónica: `main`.** Todo lo que se despliega sale de `main`. La rama de feature `claude/ork3d-landing-page-b2fQr` ya está integrada en `main` y no se usa en ningún comando.
+**Rama canónica: `main`.** Todo lo que se despliega sale de `main`. La rama de feature de V2 ya está integrada en `main` y no se usa en ningún comando.
 
 Último commit de `main` validado en producción: `d616cc2` (`chore(deploy): protege despliegue de main`). Commit del panel admin revisado: `590ed7d`.
 
