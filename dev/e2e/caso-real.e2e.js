@@ -151,13 +151,14 @@ for (const pagina of PAGINAS) {
     try {
       const atributos = await video(page).evaluate((v) => ({
         muted: v.muted, playsinline: v.hasAttribute('playsinline'), controls: v.controls, autoplay: v.autoplay,
-        loop: v.loop, preload: v.getAttribute('preload'), poster: v.getAttribute('poster'),
+        loop: v.loop, preload: v.getAttribute('preload'), poster: v.getAttribute('poster'), dataPoster: v.getAttribute('data-poster'),
         fuentes: [...v.querySelectorAll('source')].map((s) => s.getAttribute('type')),
       }));
       afirmar(atributos.muted && atributos.playsinline && atributos.controls, `atributos: ${JSON.stringify(atributos)}`);
       afirmar(!atributos.autoplay && !atributos.loop, 'el video no debe llevar autoplay ni loop en el HTML');
       afirmar(atributos.preload === 'none', 'preload debe ser none');
-      afirmar(atributos.poster === PORTADA, `portada: ${atributos.poster}`);
+      afirmar(atributos.poster === null, 'la portada no debe pedirse en la carga inicial (va en data-poster)');
+      afirmar(atributos.dataPoster === PORTADA, `portada: ${atributos.dataPoster}`);
       afirmar(JSON.stringify(atributos.fuentes) === JSON.stringify(['video/webm', 'video/mp4']), `fuentes: ${atributos.fuentes}`);
       afirmar(medios.length === 0, `el video se descargó antes de verse: ${medios.join(', ')}`);
       afirmar(errores.length === 0, errores.join(' | '));
@@ -183,11 +184,13 @@ for (const pagina of PAGINAS) {
   caso(`${n}: con prefers-reduced-motion no arranca solo; la portada y los controles quedan`, async (browser) => {
     const { ctx, page, errores } = await abrir(browser, 375, { ruta: pagina.ruta, reducir: true });
     try {
-      await video(page).scrollIntoViewIfNeeded();
+      await page.locator('.caso-real__marco').first().scrollIntoViewIfNeeded();
       await page.waitForTimeout(2500);
       const e = await estadoVideo(page);
       afirmar(e.paused && e.t === 0, `con reducción de movimiento no debe arrancar: pausado=${e.paused}, t=${e.t}`);
-      afirmar(await video(page).evaluate((v) => v.controls), 'los controles deben quedar disponibles');
+      // En móvil el control para reproducir es el botón; en escritorio, los controles nativos del video.
+      const controlDisponible = (await video(page).evaluate((v) => v.controls)) || (await page.locator('[data-caso-play]').isVisible());
+      afirmar(controlDisponible, 'debe quedar algún control para reproducir');
       afirmar(errores.length === 0, errores.join(' | '));
     } finally {
       await ctx.close();
@@ -200,10 +203,11 @@ for (const pagina of PAGINAS) {
       try {
         const d = await page.evaluate(() => ({ visible: document.documentElement.clientWidth, total: document.documentElement.scrollWidth }));
         afirmar(d.total <= d.visible, `desborde horizontal de ${d.total - d.visible} px a ${ancho} px`);
-        const caja = await video(page).boundingBox();
+        // El marco reserva la proporción: en móvil el video arranca oculto, pero el espacio ya está reservado.
+        const caja = await page.locator('.caso-real__marco').first().boundingBox();
         afirmar(Math.abs(caja.width / caja.height - 464 / 832) < 0.01,
-          `proporción del video ${(caja.width / caja.height).toFixed(3)}, se esperaba ${(464 / 832).toFixed(3)}`);
-        await video(page).scrollIntoViewIfNeeded();
+          `proporción del marco ${(caja.width / caja.height).toFixed(3)}, se esperaba ${(464 / 832).toFixed(3)}`);
+        await page.locator('.caso-real__marco').first().scrollIntoViewIfNeeded();
         await page.waitForTimeout(1500);
         const cls = await page.evaluate(() => window.__cls);
         afirmar(cls < 0.01, `CLS ${cls.toFixed(4)} a ${ancho} px`);
@@ -218,12 +222,46 @@ for (const pagina of PAGINAS) {
   }
 }
 
+for (const pagina of PAGINAS) {
+  caso(`${pagina.nombre}: en móvil el video no se descarga hasta tocar el botón y entonces se reproduce`, async (browser) => {
+    const { ctx, page, errores, medios } = await abrir(browser, 375, { ruta: pagina.ruta });
+    try {
+      await page.locator('.caso-real__marco').first().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(2500);
+      const oculto = await video(page).evaluate((v) => v.hidden);
+      const boton = page.locator('[data-caso-play]');
+      afirmar(oculto, 'en móvil el video debe quedar oculto hasta tocar el botón');
+      afirmar(await boton.isVisible(), 'en móvil debe verse el botón de reproducción');
+      afirmar(medios.length === 0, `el video se descargó sin tocar el botón: ${medios.join(', ')}`);
+      await boton.click();
+      await page.waitForFunction(() => document.querySelector('[data-caso-video]').currentTime > 0.3, null, { timeout: 8000 });
+      afirmar(!(await video(page).evaluate((v) => v.hidden)), 'tras tocar el botón el video debe mostrarse');
+      afirmar(!(await boton.isVisible()), 'tras tocar el botón el botón debe ocultarse');
+      afirmar(errores.length === 0, errores.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  caso(`${pagina.nombre}: en escritorio el botón de reproducción queda oculto y el video arranca al entrar en pantalla`, async (browser) => {
+    const { ctx, page, errores } = await abrir(browser, 1280, { ruta: pagina.ruta });
+    try {
+      afirmar(!(await page.locator('[data-caso-play]').isVisible()), 'en escritorio no debe verse el botón');
+      await video(page).scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => document.querySelector('[data-caso-video]').currentTime > 0.3, null, { timeout: 8000 });
+      afirmar(errores.length === 0, errores.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  });
+}
+
 caso('ambas páginas usan el mismo archivo de video y la misma portada, sin duplicados', async (browser) => {
   const fuentesDe = async (ruta) => {
     const { ctx, page, errores } = await abrir(browser, 1280, { ruta });
     try {
       const datos = await video(page).evaluate((v) => ({
-        poster: v.getAttribute('poster'),
+        poster: v.getAttribute('data-poster'),
         fuentes: [...v.querySelectorAll('source')].map((s) => s.getAttribute('src')),
       }));
       afirmar(errores.length === 0, errores.join(' | '));

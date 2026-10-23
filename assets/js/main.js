@@ -330,17 +330,40 @@
     });
   }
 
-  // ── Video del caso real: se reproduce una vez al entrar en pantalla (muted, sin loop, sin precarga).
-  // Con prefers-reduced-motion no arranca solo: queda la portada y los controles nativos.
+  // ── Video del caso real. En escritorio se reproduce una vez al entrar en pantalla (muted, sin loop, sin precarga).
+  // En móvil no arranca solo: el video queda oculto hasta tocar el botón, para no competir como LCP con el hero al bajar.
+  // Con prefers-reduced-motion no arranca solo en ningún tamaño: queda la portada y los controles nativos.
+  // La portada (data-poster) se asigna solo cuando hace falta, para no sumar peso a la carga inicial de la home.
   function setupCasoRealVideo() {
     var video = document.querySelector('[data-caso-video]');
-    if (!video || !('IntersectionObserver' in window)) return;
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!video) return;
+    var boton = document.querySelector('[data-caso-play]');
+    var movil = window.matchMedia && window.matchMedia('(max-width: 899px)').matches;
+    var reducir = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function ponerPortada() {
+      if (!video.poster) video.poster = video.getAttribute('data-poster');
+    }
+    function reproducir() {
+      var p = video.play();
+      if (p && p.catch) p.catch(function () {});
+    }
+    if (movil && boton) {
+      video.hidden = true;
+      boton.hidden = false;
+      boton.addEventListener('click', function () {
+        video.hidden = false;
+        boton.hidden = true;
+        ponerPortada();
+        reproducir();
+      });
+      return;
+    }
+    if (reducir) { ponerPortada(); return; }
+    if (!('IntersectionObserver' in window)) return;
     var io = new IntersectionObserver(function (entries, obs) {
       if (!entries[0].isIntersecting) return;
       obs.disconnect();
-      var p = video.play();
-      if (p && p.catch) p.catch(function () {});
+      reproducir();
     }, { threshold: 0.6 });
     io.observe(video);
   }

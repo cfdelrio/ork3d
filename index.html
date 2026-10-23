@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/assets/css/styles.css?v=17" />
+<link rel="stylesheet" href="/assets/css/styles.css?v=20" />
 
 <script type="application/ld+json">
 {
@@ -464,11 +464,12 @@
   <div class="container caso-real__grid">
     <figure class="caso-real__figura">
       <div class="caso-real__marco">
-        <video class="caso-real__video" width="464" height="832" muted playsinline controls preload="none" poster="/assets/img/caso-real/reconocimiento-empresarial-poster.webp" data-caso-video aria-label="Pieza real de reconocimiento empresarial: cuadro negro con un micrófono dorado y el texto SOY CAPAZ.">
+        <video class="caso-real__video" width="464" height="832" muted playsinline controls preload="none" data-poster="/assets/img/caso-real/reconocimiento-empresarial-poster.webp" data-caso-video aria-label="Pieza real de reconocimiento empresarial: cuadro negro con un micrófono dorado y el texto SOY CAPAZ.">
           <source src="/assets/video/caso-real/reconocimiento-empresarial.webm" type="video/webm" />
           <source src="/assets/video/caso-real/reconocimiento-empresarial.mp4" type="video/mp4" />
           Tu navegador no puede reproducir este video.
         </video>
+        <button type="button" class="btn btn--primary caso-real__play" data-caso-play hidden>Reproducir el video</button>
       </div>
       <figcaption class="caso-real__pie">
         <span class="caso-real__pie-titulo">Reconocimiento empresarial personalizado</span>
@@ -554,6 +555,6 @@
 </a>
 
 <script src="/config.js"></script>
-<script src="/assets/js/main.js?v=4"></script>
+<script src="/assets/js/main.js?v=6"></script>
 </body>
 </html>
