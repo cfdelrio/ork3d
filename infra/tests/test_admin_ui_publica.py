@@ -29,7 +29,7 @@ FAKE_CURL = os.path.join(INFRA, 'tests', 'aws_fake_curl_admin_ui.py')
 
 REVISION = '590ed7df180202390fda8a523b712b1c4e04c8cf'
 BASE = 'e8052cde6e89a11595c15e7e13a299c51bc1ac7a'
-RAMA = 'claude/ork3d-landing-page-b2fQr'
+RAMA = 'main'
 SMOKE = '633729550934477689fafb8f576dd851'
 ESTATICOS = ['admin-web/entrar.html', 'admin-web/resenas.html', 'assets/css/admin.css',
              'assets/js/admin-comun.js', 'assets/js/admin-panel.js']
@@ -362,6 +362,7 @@ class PublicarTest(Entorno):
             self.assertIn(archivo, r.stdout)
         self.assertIn('estado:', r.stdout)
         self.assertIn('Diff listo: no se escribió nada', r.stdout)
+        self.assertIn('repo: rama main', r.stdout, 'la guarda compara contra main, no contra la feature branch')
         ops = {c.get('op') for c in self.llamadas_aws()}
         self.assertTrue(ops <= {'s3api head-object', 's3api get-object'}, f'diff llamó a {ops}')
         self.assertFalse(os.path.exists(self.rutas), 'diff no crea la carpeta de copias')

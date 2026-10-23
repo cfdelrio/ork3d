@@ -1,6 +1,8 @@
 # V2 · Panel admin de reseñas (contrato de implementación)
 
-**Estado: implementación local. No desplegada. AWS y producción no modificados.**
+**Estado: desplegada en producción desde `main` (`d616cc2`).** Estado vigente y comandos actuales: `docs/resenas/ESTADO-PRODUCCION.md`.
+
+Los comandos de este documento son registros de fase. Las ramas `claude/...` que aparecían se reemplazaron por `main`, y cada `infra/prod-lectura-v2.sh` declara el estado de su fase (`PROD_LECTURA_OPINIONES` y `PROD_LECTURA_NOTIFY_ESPERADO`), porque el script ya no tiene valores por defecto.
 
 Este documento es el contrato entre las piezas de la V2: núcleo Python, API administrativa,
 UI, notificaciones y scripts de infraestructura. Si una pieza necesita cambiar un contrato
@@ -649,8 +651,8 @@ No verifica: la consola del navegador ni el inicio de sesión. Eso queda para el
 Se ejecuta en este orden. Ninguna ejecución envía correo salvo la última, y esa lo envía una sola vez.
 
 ```bash
-cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
-  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr
+cd /home/ec2-user/ork3d && git fetch origin && git checkout main \
+  && git merge --ff-only origin/main
 
 # 1. Código de la Lambda admin (CSRF 400) y smoke 401 y 400. Sin correo.
 ALLOW_ADMIN_DEPLOY=1 ALLOW_ADMIN_CODE_UPDATE=1 infra/admin-deploy.sh 2>&1 | tee /tmp/ork3d-v2-deploy/paso1.log
@@ -864,8 +866,9 @@ pestaña *Application* → *Cookies* → `https://ork3d.com` → fila `ork3d_adm
 **Lectura en EC2 (read-only)**:
 
 ```bash
-cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
-  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr && infra/prod-lectura-v2.sh
+cd /home/ec2-user/ork3d && git fetch origin && git checkout main \
+  && git merge --ff-only origin/main \
+  && PROD_LECTURA_OPINIONES=oculta PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh
 ```
 
 ## 19. Activación del aviso de reseña nueva (`RESENAS_NOTIFY_ENABLED`)
@@ -927,12 +930,12 @@ antes). Las reseñas no cambian.
 **Procedimiento (una sola línea en EC2).** Solo después de que `prod-lectura-v2.sh` dé PASS con el flag en `false`:
 
 ```bash
-cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
-  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr \
+cd /home/ec2-user/ork3d && git fetch origin && git checkout main \
+  && git merge --ff-only origin/main \
   && infra/notify-activacion.sh preflight \
   && ALLOW_NOTIFY_ENABLE=1 infra/notify-activacion.sh activar \
   && infra/notify-activacion.sh observar \
-  && PROD_LECTURA_NOTIFY_ESPERADO=true infra/prod-lectura-v2.sh
+  && PROD_LECTURA_OPINIONES=oculta PROD_LECTURA_NOTIFY_ESPERADO=true infra/prod-lectura-v2.sh
 ```
 
 Después, **una sola** reseña de prueba desde `ork3d.com`, con un comentario identificable. Confirmar en el buzón del
@@ -940,7 +943,7 @@ moderador el aviso, y luego `REVIEW_ID=<id> infra/notify-activacion.sh observar`
 `633729550934477689fafb8f576dd851` y `d1cc45e8f15a425890e2a3a8cbbc9ebd`.
 
 **Si algo sale mal:** `ALLOW_NOTIFY_ENABLE=1 infra/notify-activacion.sh revertir`, y después
-`infra/prod-lectura-v2.sh` con el valor por defecto.
+`PROD_LECTURA_OPINIONES=oculta PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh` (estado previo a la activación; el script ya no tiene valores por defecto).
 
 ## 20. Fase A: código público del aviso con las notificaciones apagadas
 
@@ -1002,15 +1005,15 @@ Con el flag apagado, dejar la sentencia de más no tiene efecto.
 **Bloque EC2 de la Fase A** (una sola cadena; cada paso corta la cadena si falla):
 
 ```bash
-cd /home/ec2-user/ork3d && git fetch origin && git checkout claude/ork3d-landing-page-b2fQr \
-  && git merge --ff-only origin/claude/ork3d-landing-page-b2fQr \
+cd /home/ec2-user/ork3d && git fetch origin && git checkout main \
+  && git merge --ff-only origin/main \
   && infra/notify-public-code-deploy.sh diff \
   && ALLOW_NOTIFY_PUBLIC_IAM=1 infra/notify-public-iam.sh aplicar \
   && ALLOW_NOTIFY_PUBLIC_CODE_DEPLOY=1 infra/notify-public-code-deploy.sh deploy \
   && infra/notify-public-iam.sh verify \
   && infra/notify-public-code-deploy.sh verify \
   && infra/notify-activacion.sh preflight \
-  && PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh
+  && PROD_LECTURA_OPINIONES=oculta PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh
 ```
 
 Si `diff` dice `NO LISTO`, la cadena se corta antes de escribir. Si `deploy` falla a mitad, la cadena se corta y el
@@ -1022,7 +1025,7 @@ redactados (`r***@e***.test` en el formato del repo); `LISTO para desplegar`. `a
 `IAM sin cambios`. `deploy` termina con `Fase A aplicada: código nuevo y RESENAS_NOTIFY_ENABLED=false`. `preflight`
 termina con `LISTO PARA ACTIVAR`. `prod-lectura-v2.sh` da PASS en todo, incluido el flag apagado.
 
-**Regresión V1 de solo lectura** (sin crear reseñas): `PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh`
+**Regresión V1 de solo lectura** (sin crear reseñas): `PROD_LECTURA_OPINIONES=oculta PROD_LECTURA_NOTIFY_ESPERADO=false infra/prod-lectura-v2.sh`
 cubre `/`, `/opinar/<token inexistente>`, `/opiniones` (accesible, `noindex, follow`, sin enlace desde home, fuera del
 sitemap), `/admin/resenas` y `/admin/entrar`, la API admin sin cookie (401), el export (allowlist) y las fotos públicas.
 

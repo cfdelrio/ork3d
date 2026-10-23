@@ -426,7 +426,7 @@ class FrontendDeployTest(unittest.TestCase):
         env = {'PATH': os.environ.get('PATH', ''), 'AWS_CLI': FAKE_AWS, 'CURL_CMD': FAKE_CURL, 'GIT_CMD': FAKE_GIT,
                'FAKE_ESTADO': self.estado, 'FAKE_LOG': self.log, 'FAKE_CURL_REQ': self.curl_req,
                'FAKE_SITIO_DIR': self.sitio, 'ADMIN_DEPLOY_RUTA': self.rb, 'FRONT_REINTENTOS': '1',
-               'FRONT_ESPERA': '0', 'FAKE_GIT_RAMA': 'claude/ork3d-landing-page-b2fQr'}
+               'FRONT_ESPERA': '0', 'FAKE_GIT_RAMA': 'main'}
         if permitir:
             env['ALLOW_ADMIN_FRONTEND'] = '1'
         env.update(extra or {})

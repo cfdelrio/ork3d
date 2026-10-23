@@ -2,7 +2,7 @@
 
 Commit revisado: `590ed7df180202390fda8a523b712b1c4e04c8cf` (rediseño aprobado).
 Commit anterior: `e8052cde6e89a11595c15e7e13a299c51bc1ac7a` (lanzamiento de `/opiniones`).
-Branch: `claude/ork3d-landing-page-b2fQr`. El despliegue se ejecuta **desde EC2**. Este documento no ejecuta nada.
+Branch: `main` (canónica; la rama de feature está integrada en `main` desde `d616cc2`). El despliegue se ejecuta **desde EC2**. Este documento no ejecuta nada. **Estado: desplegado en producción el 2026-10-22; post-deploy TODO PASS.** Estado vigente: `ESTADO-PRODUCCION.md`.
 
 ## Qué se publica
 
@@ -25,7 +25,7 @@ Manifiesto: `infra/admin-ui-archivos.tsv`. Las cabeceras son las mismas que usa 
 ## Guardas (`publicar` y `diff` se niegan si…)
 
 - el repo tiene cambios sin commitear;
-- HEAD no es igual a `origin/claude/ork3d-landing-page-b2fQr` (`ls-remote`);
+- HEAD no es igual a `origin/main` (`ls-remote`);
 - el manifiesto no es exactamente la intersección de `git diff e8052cd..590ed7d` con los estáticos del panel;
 - falta algún archivo del manifiesto, o su contenido en HEAD no es el de `590ed7d`.
 
@@ -36,8 +36,8 @@ Manifiesto: `infra/admin-ui-archivos.tsv`. Las cabeceras son las mismas que usa 
 ```bash
 cd /ruta/al/repo                       # checkout limpio del branch
 git status --porcelain                 # debe salir vacío
-git fetch origin claude/ork3d-landing-page-b2fQr
-git merge --ff-only origin/claude/ork3d-landing-page-b2fQr
+git fetch origin main
+git merge --ff-only origin/main
 
 infra/admin-ui-publicar.sh diff        # guardas + diferencias local ↔ S3. No escribe.
 SMOKE_NOTIFY_ID=<id de la reseña de prueba de notificaciones> infra/admin-ui-verify.sh pre
@@ -88,7 +88,7 @@ SMOKE_NOTIFY_ID=<id> infra/admin-ui-verify.sh post           # verificación de 
 
 ```
 ── Guardas del repo ──
-  repo: rama claude/ork3d-landing-page-b2fQr · HEAD <sha> = origin · contiene 590ed7df…
+  repo: rama main · HEAD <sha> = origin · contiene 590ed7df…
   manifiesto = intersección de git diff e8052cde…..590ed7df… con los estáticos del panel (5 archivos)
 ── Copia previa (600) ──
   admin-web/entrar.html: existía (copiado con sus cabeceras)  … (una línea por archivo)

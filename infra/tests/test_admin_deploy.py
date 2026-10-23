@@ -23,7 +23,7 @@ AYUDA = os.path.join(RAIZ, 'infra', 'admin_deploy_ayuda.py')
 FAKE_AWS = os.path.join(RAIZ, 'infra', 'tests', 'aws_fake_admin.py')
 FAKE_GIT = os.path.join(RAIZ, 'infra', 'tests', 'aws_fake_git.py')
 FAKE_CURL = os.path.join(RAIZ, 'infra', 'tests', 'aws_fake_curl.py')
-RAMA = 'claude/ork3d-landing-page-b2fQr'
+RAMA = 'main'
 HEAD = '202ecb7ed9016a607eb2854f3d5a92ccf8a5466c'
 FROM = 'remitente-prueba@ejemplo.test'
 ADMIN = 'moderacion-prueba@ejemplo.test'
@@ -149,9 +149,11 @@ class PrechecksTest(DespliegueTest):
         self.assertEqual(self.llamadas(), [])
 
     def test_rama_incorrecta_no_escribe(self):
-        r = self.correr({'FAKE_GIT_RAMA': 'main'})
+        # La rama esperada es main: una rama distinta se rechaza sin escribir nada.
+        r = self.correr({'FAKE_GIT_RAMA': 'rama-de-prueba-distinta'})
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn('branch main', r.stdout + r.stderr)
+        self.assertIn('branch rama-de-prueba-distinta; se esperaba main', r.stdout + r.stderr)
+        self.assertEqual(self.mutantes(), [])
         self.assertEqual(self.mutantes(), [])
 
     def test_arbol_sucio_no_escribe(self):

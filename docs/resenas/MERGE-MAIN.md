@@ -1,5 +1,7 @@
 # Integración de la rama a main: auditoría y plan
 
+**Estado (2026-10-23): integrado en `main` (`d616cc2`).** Este documento es el registro de la auditoría previa al merge. Las referencias a la rama de feature y los comandos de merge se conservan como registro. El estado vigente está en `ESTADO-PRODUCCION.md`.
+
 Rama: `claude/ork3d-landing-page-b2fQr`. Destino: `main`. Este documento no integra nada ni despliega nada.
 
 ## 1. Estado de las refs

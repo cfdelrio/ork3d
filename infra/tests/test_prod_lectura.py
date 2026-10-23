@@ -276,6 +276,9 @@ class PruebaEndToEndTest(unittest.TestCase):
         env = {'PATH': os.environ.get('PATH', ''), 'CURL_CMD': FAKE_CURL, 'AWS_CLI': FAKE_AWS,
                'FAKE_SITIO_DIR': self.sitio, 'FAKE_ESTADO': self.estado, 'FAKE_CURL_REQ': self.peticiones}
         env.setdefault('PROD_LECTURA_OPINIONES', 'lanzada')
+        # La fixture simulada arranca sin RESENAS_NOTIFY_ENABLED (notificaciones apagadas): el harness lo declara.
+        # Cada prueba que necesite otro estado lo pasa en extra.
+        env.setdefault('PROD_LECTURA_NOTIFY_ESPERADO', 'false')
         env.update(extra or {})
         return subprocess.run(['bash', SCRIPT], env=env, cwd=RAIZ, capture_output=True, text=True, timeout=120)
 
@@ -364,6 +367,86 @@ class PruebaEndToEndTest(unittest.TestCase):
         r = self.correr(extra={'PROD_LECTURA_OPINIONES': 'publica'})
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertEqual(self.peticiones_hechas(), 0)
+
+
+    def estado_con_notificaciones_activas(self):
+        st = fake.estado_inicial()
+        st['publica']['config']['Environment']['Variables']['RESENAS_NOTIFY_ENABLED'] = 'true'
+        return st
+
+    def test_estado_productivo_lanzada_y_notificaciones_on_solo_falla_el_redirect_del_simulador(self):
+        r = self.correr(self.estado_con_notificaciones_activas(),
+                        extra={'PROD_LECTURA_OPINIONES': 'lanzada', 'PROD_LECTURA_NOTIFY_ESPERADO': 'true'})
+        fallos = [l for l in self.lineas(r) if l.startswith('FAIL')]
+        self.assertEqual(len(fallos), 1, fallos)
+        self.assertIn('www redirige al apex', fallos[0])
+        self.assertIn('PASS  RESENAS_NOTIFY_ENABLED encendido', r.stdout)
+        self.assertIn('PASS  /opiniones indexable, canonical correcto', r.stdout)
+        self.assertIn('PASS  home enlaza /opiniones (footer)', r.stdout)
+
+    def test_notificaciones_activas_con_el_flag_esperado_en_false_se_detectan(self):
+        r = self.correr(self.estado_con_notificaciones_activas(),
+                        extra={'PROD_LECTURA_OPINIONES': 'lanzada', 'PROD_LECTURA_NOTIFY_ESPERADO': 'false'})
+        self.assertIn('FAIL  RESENAS_NOTIFY_ENABLED apagado', r.stdout)
+
+    def test_notificaciones_apagadas_con_el_flag_esperado_en_true_se_detectan(self):
+        r = self.correr(extra={'PROD_LECTURA_OPINIONES': 'lanzada', 'PROD_LECTURA_NOTIFY_ESPERADO': 'true'})
+        self.assertIn('FAIL  RESENAS_NOTIFY_ENABLED encendido', r.stdout)
+
+
+class ProdLecturaSinEstadoExplicitoTest(unittest.TestCase):
+    """Sin estado explícito no hay control ni petición: ningún default histórico se aplica en silencio."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='prod-lectura-sin-estado-')
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.peticiones = os.path.join(self.tmp, 'peticiones.jsonl')
+        self.sitio = os.path.join(self.tmp, 'sitio')
+        os.makedirs(self.sitio)
+        self.estado = os.path.join(self.tmp, 'estado.json')
+        with open(self.estado, 'w', encoding='utf-8') as f:
+            json.dump(fake.estado_inicial(), f)
+
+    def correr(self, extra):
+        env = {'PATH': os.environ.get('PATH', ''), 'CURL_CMD': FAKE_CURL, 'AWS_CLI': FAKE_AWS,
+               'FAKE_SITIO_DIR': self.sitio, 'FAKE_ESTADO': self.estado, 'FAKE_CURL_REQ': self.peticiones}
+        env.update(extra)
+        return subprocess.run(['bash', SCRIPT], env=env, cwd=RAIZ, capture_output=True, text=True, timeout=120)
+
+    def peticiones_hechas(self):
+        if not os.path.exists(self.peticiones):
+            return 0
+        with open(self.peticiones, encoding='utf-8') as f:
+            return len(f.readlines())
+
+    def test_sin_ninguna_variable_sale_con_2_y_no_pide_nada(self):
+        r = self.correr({})
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('PROD_LECTURA_NOTIFY_ESPERADO', r.stderr)
+        self.assertEqual(self.peticiones_hechas(), 0)
+        self.assertNotIn('PASS', r.stdout + r.stderr)
+
+    def test_falta_el_estado_de_notificaciones_sale_con_2(self):
+        r = self.correr({'PROD_LECTURA_OPINIONES': 'lanzada'})
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('PROD_LECTURA_NOTIFY_ESPERADO', r.stderr)
+        self.assertEqual(self.peticiones_hechas(), 0)
+
+    def test_falta_el_estado_de_opiniones_sale_con_2(self):
+        r = self.correr({'PROD_LECTURA_NOTIFY_ESPERADO': 'true'})
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('PROD_LECTURA_OPINIONES', r.stderr)
+        self.assertEqual(self.peticiones_hechas(), 0)
+
+    def test_el_script_no_contiene_defaults_historicos(self):
+        texto = leer_texto(SCRIPT)
+        self.assertIsNone(re.search(r':-(oculta|lanzada|true|false)\}', texto),
+                          'un default de estado es un falso negativo en espera')
+
+
+def leer_texto(ruta):
+    with open(ruta, encoding='utf-8') as f:
+        return f.read()
 
 
 if __name__ == '__main__':

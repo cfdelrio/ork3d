@@ -8,7 +8,7 @@
 
 REVISION_REVISADA="590ed7df180202390fda8a523b712b1c4e04c8cf"   # rediseño del panel, UX/UI aprobada
 REVISION_BASE="e8052cde6e89a11595c15e7e13a299c51bc1ac7a"       # estado anterior: el diff de estáticos sale de aquí
-RAMA="claude/ork3d-landing-page-b2fQr"
+RAMA="main"
 BUCKET="ork3d.com"
 DIST="ECOW0H6A48HVP"
 BASE="https://ork3d.com"

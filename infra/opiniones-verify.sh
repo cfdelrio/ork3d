@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ORK3D · /opiniones: verificación de producción. SOLO LECTURA: GET al sitio y lecturas de AWS.
 #
-# pre  (antes de publicar): /opiniones oculta (noindex), home sin enlace, sitemap sin entrada, notificaciones ON,
+# pre  (HISTÓRICO, antes del lanzamiento; exige OPINIONES_PRE_HISTORICO=1): /opiniones oculta (noindex), home sin enlace,
+#      sitemap sin entrada, notificaciones ON,
 #      export sano y ninguna reseña de prueba visible. Si una reseña de prueba aparece en el export: DETENER.
 # post (después de publicar): /opiniones lanzada (indexable, canonical, enlazada desde el footer, en el sitemap),
 #      título y description, assets con su tipo, export sano, ninguna reseña de prueba visible, notificaciones ON
@@ -18,6 +19,10 @@ case "$MODO" in
   pre|post) ;;
   *) echo "uso: $0 pre|post" >&2; exit 2 ;;
 esac
+if [[ "$MODO" == pre && "${OPINIONES_PRE_HISTORICO:-}" != "1" ]]; then
+  echo "ABORTA: pre verifica /opiniones ANTES del lanzamiento (oculta, noindex). /opiniones ya está lanzada en producción: usar post. Para la comprobación histórica: OPINIONES_PRE_HISTORICO=1 infra/opiniones-verify.sh pre" >&2
+  exit 2
+fi
 [[ -n "${SMOKE_NOTIFY_ID:-}" ]] || { echo "ERROR: falta SMOKE_NOTIFY_ID: sin el id de la reseña de prueba de notificaciones no se puede confirmar que no esté publicada." >&2; exit 2; }
 [[ "$SMOKE_NOTIFY_ID" =~ ^[0-9a-f]{32}$ ]] || { echo "ERROR: SMOKE_NOTIFY_ID debe tener 32 caracteres hexadecimales." >&2; exit 2; }
 

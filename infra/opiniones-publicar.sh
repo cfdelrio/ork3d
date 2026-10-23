@@ -8,7 +8,7 @@
 # Modos:
 #   diff (por defecto)  SOLO LECTURA. Lista los archivos exactos, compara el SHA-256 local con el de S3, y verifica
 #                       que el repo esté limpio y en el mismo commit que origin.
-#   publicar            Exige ALLOW_OPINIONES_PUBLISH=1. Guarda los objetos actuales y sus cabeceras (600) en una
+#   publicar            Exige ALLOW_OPINIONES_PUBLISH=1 y OPINIONES_REPUBLICAR=1 (/opiniones ya está lanzada). Guarda los objetos actuales y sus cabeceras (600) en una
 #                       carpeta de copia, sube solo los archivos del manifiesto, invalida sus rutas y espera.
 #   revertir            Exige ALLOW_OPINIONES_PUBLISH=1. Restaura los objetos de la copia más reciente con sus cabeceras
 #                       originales, e invalida las mismas rutas.
@@ -31,6 +31,13 @@ if [[ "$MODO" == publicar || "$MODO" == revertir ]] && [[ "${ALLOW_OPINIONES_PUB
   exit 3
 fi
 
+# /opiniones ya está lanzada en producción: publicar vuelve a subir la misma página. Solo tiene sentido si el repo
+# cambió, así que exige una segunda marca explícita. revertir no cambia: sigue con ALLOW_OPINIONES_PUBLISH=1.
+if [[ "$MODO" == publicar && "${OPINIONES_REPUBLICAR:-}" != "1" ]]; then
+  echo "ABORTA: /opiniones ya está lanzada en producción. publicar vuelve a subir la misma página: solo tiene sentido si el repo cambió. Para republicar a propósito: ALLOW_OPINIONES_PUBLISH=1 OPINIONES_REPUBLICAR=1 infra/opiniones-publicar.sh publicar" >&2
+  exit 3
+fi
+
 PERFIL="${AWS_PROFILE:-default}"
 REGION="${AWS_REGION:-us-east-1}"
 [[ "$PERFIL" == "default" ]] || { echo "ERROR: AWS_PROFILE solo puede ser default en este paso." >&2; exit 2; }
@@ -43,7 +50,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFIESTO="$ROOT/infra/opiniones-archivos.tsv"
 BUCKET="${OPINIONES_BUCKET:-ork3d.com}"
 DIST="${OPINIONES_DIST:-ECOW0H6A48HVP}"
-RAMA="claude/ork3d-landing-page-b2fQr"
+RAMA="main"
 RUTA="${OPINIONES_RUTA:-/tmp/ork3d-opiniones}"
 RB="$RUTA/rollback"
 T="$(mktemp -d)"

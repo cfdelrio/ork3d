@@ -1,13 +1,14 @@
 # Reseñas de clientes · arquitectura, seguridad, costos y runbook
 
+Estado vigente de V2 y comandos actuales: `docs/resenas/ESTADO-PRODUCCION.md` (rama canónica `main`). Lo de abajo es el registro de cada fase.
+
 Estado: **V1 completada en producción.** Infraestructura, `config.js`, merge a `main` y deploy (run `39659217831`, #27: success)
-están cerrados. El smoke productivo se ejecutó y verificó desde el entorno EC2 de producción (runbook, sección 14). **`/opiniones` sigue sin lanzar**:
-existe por URL directa, con noindex, fuera del sitemap y sin enlaces desde home ni navegación. Lo que sigue abierto está en
+están cerrados. El smoke productivo se ejecutó y verificó desde el entorno EC2 de producción (runbook, sección 14). **`/opiniones` está lanzada** (validada en producción: indexable, canonical, enlazada desde home y en el sitemap). Lo que sigue abierto está en
 "Pendientes reales". El procedimiento y los hallazgos están en `docs/resenas/RUNBOOK-DESPLIEGUE-MANUAL.md`.
 
-## Estado de la V2 (panel admin): implementada localmente, no desplegada
+## Estado de la V2 (panel admin): desplegada en producción
 
-**V2 admin implementada y validada localmente. AWS y producción todavía no modificados.**
+**V2 admin desplegada y validada en producción desde `main` (`d616cc2`).** La tabla describe cada componente.
 
 | Punto | Estado |
 | --- | --- |
@@ -19,9 +20,9 @@ existe por URL directa, con noindex, fuera del sitemap y sin enlaces desde home 
 | Panel web `/admin/resenas` y `/admin/entrar` | ✔ local, E2E de 28 casos en Chromium |
 | Scripts de infraestructura | ✔ solo DRY_RUN (`infra/admin-setup.sh`). No se ejecutó ningún comando de AWS |
 | CLI `admin/resenas.sh` | Sin cambios (opción A). Paridad probada sobre el mismo almacén |
-| Producción | No modificada: sin deploy, sin SES, sin DNS, sin IAM, sin CloudFront |
+| Producción | Desplegada: Lambda admin, API con 401 sin sesión, panel con CSS/JS v2 `no-store`, notificaciones activas (`RESENAS_NOTIFY_ENABLED=true`), export con 0 reseñas, logs sin cookies |
 
-Pendientes antes de desplegar (no están hechos): 2FA en el buzón de moderación, verificación de
+Pendientes de V2 (revisar cuáles siguen abiertos antes de dar la V2 por cerrada): 2FA en el buzón de moderación, verificación de
 smoke de `If-Match` en la cuenta (gate, runbook §18.5.1), verificación de OAC y del hash en los POST (gate, runbook §18.5.2), y la identidad SES de
 producción. Lista completa en la sección "Pendientes de V2" de este archivo y en el runbook (sección 18).
 

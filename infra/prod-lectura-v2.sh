@@ -6,7 +6,9 @@
 #
 # Una línea por control (PASS/FAIL). Código 0 si todos pasan, 1 si alguno falla, 2 si no se pudo ejecutar.
 # Variables opcionales: CURL_CMD, AWS_CLI (para pruebas), PROD_LECTURA_BASE (por defecto https://ork3d.com).
-# PROD_LECTURA_OPINIONES (oculta|lanzada), PROD_LECTURA_NOTIFY_ESPERADO (false|true).
+# OBLIGATORIAS, sin valor por defecto: PROD_LECTURA_OPINIONES (oculta|lanzada) y PROD_LECTURA_NOTIFY_ESPERADO (true|false).
+# El script no adivina el estado: si falta una de las dos, sale con 2 antes de cualquier petición o lectura de AWS.
+# Estado vigente de producción: docs/resenas/ESTADO-PRODUCCION.md.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,18 +18,20 @@ AWS="${AWS_CLI:-aws}"
 BASE="${PROD_LECTURA_BASE:-https://ork3d.com}"
 export AWS_PROFILE="${AWS_PROFILE:-default}" AWS_REGION="${AWS_REGION:-us-east-1}" AWS_PAGER=""
 
-# PROD_LECTURA_NOTIFY_ESPERADO: false antes de activar (por defecto); true después de infra/notify-activacion.sh activar.
-NOTIFY_ESPERADO="${PROD_LECTURA_NOTIFY_ESPERADO:-false}"
+# PROD_LECTURA_NOTIFY_ESPERADO: obligatoria. true = notificaciones activas (producción desde 2026-10-22); false = antes de activar.
+NOTIFY_ESPERADO="${PROD_LECTURA_NOTIFY_ESPERADO:-}"
 case "$NOTIFY_ESPERADO" in
   true) NOMBRE_FLAG="RESENAS_NOTIFY_ENABLED encendido" ;;
   false) NOMBRE_FLAG="RESENAS_NOTIFY_ENABLED apagado" ;;
+  "") echo "ERROR: falta PROD_LECTURA_NOTIFY_ESPERADO (true o false). Sin este valor no se ejecuta ningún control." >&2; exit 2 ;;
   *) echo "ERROR: PROD_LECTURA_NOTIFY_ESPERADO debe ser true o false." >&2; exit 2 ;;
 esac
 
-# PROD_LECTURA_OPINIONES: oculta (antes del lanzamiento, por defecto) o lanzada (después de publicar /opiniones).
-OPINIONES_ESTADO="${PROD_LECTURA_OPINIONES:-oculta}"
+# PROD_LECTURA_OPINIONES: obligatoria. oculta (antes del lanzamiento) o lanzada (/opiniones publicada: estado de producción).
+OPINIONES_ESTADO="${PROD_LECTURA_OPINIONES:-}"
 case "$OPINIONES_ESTADO" in
   oculta|lanzada) ;;
+  "") echo "ERROR: falta PROD_LECTURA_OPINIONES (oculta o lanzada). Sin este valor no se ejecuta ningún control." >&2; exit 2 ;;
   *) echo "ERROR: PROD_LECTURA_OPINIONES debe ser oculta o lanzada." >&2; exit 2 ;;
 esac
 

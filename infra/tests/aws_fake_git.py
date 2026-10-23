@@ -7,7 +7,7 @@ FAKE_GIT_SUCIO=1 (árbol con cambios).
 import os
 import sys
 
-RAMA = os.environ.get('FAKE_GIT_RAMA', 'claude/ork3d-landing-page-b2fQr')
+RAMA = os.environ.get('FAKE_GIT_RAMA', 'main')
 HEAD = os.environ.get('FAKE_GIT_HEAD', '202ecb7ed9016a607eb2854f3d5a92ccf8a5466c')
 REMOTO = os.environ.get('FAKE_GIT_REMOTO', HEAD)
 args = sys.argv[1:]

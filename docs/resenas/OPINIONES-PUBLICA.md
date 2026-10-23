@@ -1,7 +1,6 @@
 # /opiniones: lanzamiento público
 
-Estado: preparado. Ningún archivo de esta fase se publicó todavía. La publicación la ejecuta el operador con el
-bloque EC2 de abajo, después del preflight.
+Estado: **lanzada** (commit `e8052cd`, validada en producción: indexable, canonical, enlazada desde home, en el sitemap). Este documento conserva la auditoría y el procedimiento de lanzamiento. No volver a ejecutar el bloque de publicación: el tooling exige `OPINIONES_REPUBLICAR=1` además de `ALLOW_OPINIONES_PUBLISH=1` (ver `ESTADO-PRODUCCION.md`).
 
 ## 1. Auditoría de la página antes del lanzamiento
 

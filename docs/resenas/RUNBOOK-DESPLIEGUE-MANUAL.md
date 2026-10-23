@@ -1,6 +1,6 @@
 # Runbook de despliegue manual · reseñas ORK3D (V1, prueba controlada)
 
-**Estado: V1 completada en producción.** Infraestructura, `config.js`, merge a `main`, deploy y smoke test productivo están cerrados. Lo que sigue abierto está en la sección 17.3. Este documento no crea ni modifica nada por sí solo.
+**Estado: V1 completada en producción.** Estado vigente de V2 y comandos actuales: `docs/resenas/ESTADO-PRODUCCION.md`. Infraestructura, `config.js`, merge a `main`, deploy y smoke test productivo están cerrados. Lo que sigue abierto está en la sección 17.3. Este documento no crea ni modifica nada por sí solo.
 Cada comando se corre a mano, en orden, y cada paso tiene una salida esperada. Si una salida no coincide, **parás**.
 
 Qué crea el despliegue de infraestructura: un bucket S3 privado, un rol IAM mínimo, un log group con retención de 30 días,

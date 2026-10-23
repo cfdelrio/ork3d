@@ -196,7 +196,7 @@ class ScriptsTest(unittest.TestCase):
             self.assertNotIn(escritura, codigo, escritura)
 
     def test_verificar_exige_el_id_de_la_reseña_de_prueba(self):
-        r = subprocess.run(['bash', VERIFICAR, 'pre'], env={'PATH': os.environ.get('PATH', '')},
+        r = subprocess.run(['bash', VERIFICAR, 'post'], env={'PATH': os.environ.get('PATH', '')},
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn('SMOKE_NOTIFY_ID', r.stderr)
@@ -291,6 +291,10 @@ class PublicacionFakeTest(unittest.TestCase):
                'FAKE_GIT_HEAD': 'abc123', 'FAKE_GIT_ORIGIN': 'abc123'}
         if guardia and modo in ('publicar', 'revertir'):
             env['ALLOW_OPINIONES_PUBLISH'] = '1'
+        if guardia and modo == 'publicar':
+            # Estas pruebas publican a propósito sobre /opiniones ya lanzada. La marca explícita de republicación tiene
+            # sus propias pruebas en infra/tests/test_cierre_main.py.
+            env['OPINIONES_REPUBLICAR'] = '1'
         env.update(extra or {})
         return subprocess.run(['bash', PUBLICAR, modo], env=env, cwd=RAIZ, capture_output=True, text=True, timeout=120)
 
