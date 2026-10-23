@@ -1861,6 +1861,67 @@ html.js [data-reveal].is-in {
 }
 .mosaic__item--series { max-width: 560px; }
 .mosaic__item--small { max-width: 260px; }
+/* Foto ampliada: la foto del mosaico es un botón que abre un <dialog> a pantalla completa (ver setupPhotoLightbox). */
+.mosaic__zoom {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 28px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: zoom-in;
+}
+.mosaic__zoom:focus-visible { outline: 2px solid var(--color-lime); outline-offset: 4px; }
+.lightbox {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  background: transparent;
+}
+.lightbox[open] { display: grid; place-items: center; }
+.lightbox::backdrop { background: rgba(10, 10, 10, 0.96); }
+/* La foto escala hasta la dimensión limitante del viewport conservando su proporción (--ratio lo fija main.js). */
+.lightbox img {
+  display: block;
+  width: min(calc(100vw - 32px), calc((100vh - 110px) * var(--ratio, 1)));
+  height: auto;
+  object-fit: contain;
+  border-radius: 20px;
+}
+.lightbox__caption {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  color: rgba(243, 240, 233, 0.86);
+}
+.lightbox__close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border: 1.5px solid rgba(243, 240, 233, 0.7);
+  border-radius: 999px;
+  background: rgba(25, 25, 25, 0.6);
+  color: var(--color-cream);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lightbox__close:focus-visible { outline: 2px solid var(--color-lime); outline-offset: 3px; }
+html.is-lightbox-open { overflow: hidden; }
 .mosaic__label { margin: 14px 0 0; color: var(--text-dim); }
 .mosaic__head {
   display: flex;
