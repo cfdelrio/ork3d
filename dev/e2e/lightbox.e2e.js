@@ -27,9 +27,9 @@ const CHROME = process.env.CHROME_PATH
   || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 // Viewports: móvil, escritorio y una pantalla grande (la foto tiene que escalar, no quedar en su tamaño natural).
 const VISTAS = [{ ancho: 375, alto: 800 }, { ancho: 1280, alto: 800 }, { ancho: 1920, alto: 1080 }];
-const SERIE = '/assets/img/fotos/series-800.webp';
-const PERSONALIZACION = '/assets/img/fotos/personalizacion-470.webp';
-const PRODUCCION = '/assets/img/fotos/produccion-retrato-740.webp';
+const SERIE = '/assets/img/fotos/piezas-serie-medlog-800.webp';
+const PERSONALIZACION = '/assets/img/fotos/piezas-personalizado-lego-800.webp';
+const CAMISETA = '/assets/img/fotos/piezas-camiseta-40-800.webp';
 
 const casos = [];
 function caso(nombre, fn) { casos.push({ nombre, fn }); }
@@ -93,7 +93,7 @@ async function abrirConBoton(p, indice) {
 caso('cada foto del mosaico es un botón con nombre accesible', async (browser) => {
   const { ctx, page, errores } = await abrirHome(browser, 1280);
   try {
-    afirmar(await botones(page).count() === 8, `se esperaban 8 botones (3 del mosaico + 5 de la galería), hay ${await botones(page).count()}`);
+    afirmar(await botones(page).count() === 5, `se esperaban 5 botones (las cinco fotos de la galería), hay ${await botones(page).count()}`);
     const nombres = await botones(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
     for (const n of nombres) afirmar(n && n.startsWith('Ampliar foto: '), `nombre accesible inesperado: ${n}`);
     afirmar(errores.length === 0, errores.join(' | '));
@@ -249,12 +249,12 @@ caso('la galería no genera desborde horizontal en móvil', async (browser) => {
   }
 });
 
-caso('la foto de producción abre su versión ampliada', async (browser) => {
+caso('la foto de la camiseta 40 abre su versión ampliada', async (browser) => {
   const { ctx, page, errores } = await abrirHome(browser, 375);
   try {
-    await abrirConBoton(page, 2);
-    afirmar((await page.locator('dialog.lightbox img').getAttribute('src')) === PRODUCCION,
-      'la foto de producción debe abrir produccion-retrato-740.webp');
+    await abrirConBoton(page, 3);
+    afirmar((await page.locator('dialog.lightbox img').getAttribute('src')) === CAMISETA,
+      'la foto de la camiseta 40 debe abrir piezas-camiseta-40-800.webp');
     afirmar(errores.length === 0, errores.join(' | '));
   } finally {
     await ctx.close();

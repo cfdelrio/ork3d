@@ -1937,6 +1937,7 @@ html.is-lightbox-open { overflow: hidden; }
 }
 .mosaic__item--galeria { max-width: none; }
 .mosaic__item--galeria img { aspect-ratio: 4 / 5; object-fit: cover; }
+.mosaic__item--galeria .mosaic__caption { margin-left: 0; }
 .mosaic__label { margin: 14px 0 0; color: var(--text-dim); }
 .mosaic__head {
   display: flex;
