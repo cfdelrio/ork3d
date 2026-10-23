@@ -1421,6 +1421,7 @@ html.js [data-reveal].is-in {
 }
 .caso-real__figura { margin: 0; }
 .caso-real__marco {
+  position: relative;
   width: min(100%, 340px);
   aspect-ratio: 464 / 832;
   margin: 0 auto;
@@ -1435,6 +1436,21 @@ html.js [data-reveal].is-in {
   height: 100%;
   object-fit: cover;
 }
+/* En móvil el video arranca oculto y se muestra al tocar el botón (ver setupCasoRealVideo). */
+.caso-real__video[hidden],
+.caso-real__play[hidden] { display: none; }
+/* Más específico que .theme-lila .btn--primary: sobre el marco negro el botón tiene que seguir siendo lima. */
+.caso-real__marco .caso-real__play.btn--primary {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: fit-content;
+  height: fit-content;
+  background: var(--color-lime);
+  color: var(--color-black);
+}
+.caso-real__marco .caso-real__play.btn--primary:hover { background: var(--color-cream); }
+.caso-real__play:focus-visible { outline: 2px solid var(--color-cream); outline-offset: 4px; }
 .caso-real__pie {
   display: flex;
   flex-direction: column;
