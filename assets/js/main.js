@@ -330,6 +330,21 @@
     });
   }
 
+  // ── Video del caso real: se reproduce una vez al entrar en pantalla (muted, sin loop, sin precarga).
+  // Con prefers-reduced-motion no arranca solo: queda la portada y los controles nativos.
+  function setupCasoRealVideo() {
+    var video = document.querySelector('[data-caso-video]');
+    if (!video || !('IntersectionObserver' in window)) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var io = new IntersectionObserver(function (entries, obs) {
+      if (!entries[0].isIntersecting) return;
+      obs.disconnect();
+      var p = video.play();
+      if (p && p.catch) p.catch(function () {});
+    }, { threshold: 0.6 });
+    io.observe(video);
+  }
+
   // ── Init ────────────────────────────────────────────────────────────────
   wireWaLinks();
   wireProductCards();
@@ -338,6 +353,7 @@
   setupDeadlineCta();
   setupGiftQuoteForm();
   setupGiftPageAnalytics();
+  setupCasoRealVideo();
   setupNav();
   setupStickyMobile();
   trackPageView();
