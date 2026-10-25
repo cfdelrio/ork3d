@@ -100,9 +100,9 @@ caso('textos del hero: eyebrow, H1 único, descripción, complemento, beneficios
     afirmar((await page.locator('.hero__sub').innerText()).trim()
       === 'Sorprendé a tu equipo con regalos que combinan la identidad de tu empresa con un detalle personalizado para cada integrante.', 'descripción');
     afirmar((await page.locator('.hero__pitch').innerText()).trim()
-      === 'Diseño y fabricación propios, con personalización individual y producción por cantidad.', 'complemento');
+      === 'Te respondemos rápido y te ayudamos a elegir la cantidad, desde una pieza hasta una serie.', 'complemento');
     const beneficios = await page.locator('.hero__beneficios li').allInnerTexts();
-    afirmar(JSON.stringify(beneficios) === JSON.stringify(['Diseño propio', 'Personalización individual', 'Producción por cantidad']),
+    afirmar(JSON.stringify(beneficios) === JSON.stringify(['Respuesta rápida', 'Sin grandes pedidos mínimos', 'Personalización individual']),
       `beneficios: ${JSON.stringify(beneficios)}`);
     afirmar((await page.locator('.hero__microcopy').innerText()).trim() === 'Diseñado y fabricado en Buenos Aires.', 'microcopy');
     afirmar(errores.length === 0, errores.join(' | '));

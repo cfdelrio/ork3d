@@ -1305,6 +1305,17 @@ html.js [data-reveal].is-in {
   .hero--empresas .hero__piezas { gap: 8px; }
   .hero--empresas .hero__pieza { padding: 6px; border-radius: 18px; }
   .hero--empresas .hero__pieza img { border-radius: 13px; }
+  /* Apilados, cada beneficio lleva su indicador al inicio: un punto al final de línea sugeriría que la lista sigue. */
+  .hero--empresas .hero__beneficios { flex-direction: column; gap: 6px; }
+  .hero--empresas .hero__beneficios li::after { display: none; }
+  .hero--empresas .hero__beneficios li::before {
+    content: '';
+    width: 6px; height: 6px;
+    margin-right: 10px;
+    border-radius: 50%;
+    background: var(--color-coral);
+    flex-shrink: 0;
+  }
 }
 
 /* Utility */
