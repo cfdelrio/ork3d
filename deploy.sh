@@ -90,6 +90,11 @@ s3_sitio cp regalos-empresariales-fin-de-ano.html "s3://${BUCKET}/regalos-empres
   --content-type "text/html; charset=utf-8" \
   --metadata-directive REPLACE
 
+s3_sitio cp reconocimientos-empresariales.html "s3://${BUCKET}/reconocimientos-empresariales.html" \
+  --cache-control "public, max-age=60, must-revalidate" \
+  --content-type "text/html; charset=utf-8" \
+  --metadata-directive REPLACE
+
 # CSS / JS / SVG: cache larga. Mismas exclusiones del panel admin que el sync (rutas relativas a assets/).
 s3_sitio cp assets/ "s3://${BUCKET}/assets/" \
   --recursive \

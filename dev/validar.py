@@ -125,7 +125,7 @@ class Balance(HTMLParser):
 
 
 def validar_html():
-    paginas = ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'error.html',
+    paginas = ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'reconocimientos-empresariales.html', 'error.html',
                'opinar.html', 'opiniones.html', 'admin-web/resenas.html', 'admin-web/entrar.html']
     for rel in paginas:
         parser = Balance()

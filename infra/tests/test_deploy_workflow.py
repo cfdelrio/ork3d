@@ -240,5 +240,25 @@ class DetectaRupturasTest(unittest.TestCase):
         self.assertFalla(lineas, 'le faltan')
 
 
+class PaginaEnDisparadorTest(unittest.TestCase):
+    """Un cambio en la página nueva dispara deploy.yml cuando llega a main; la guarda de rama no cambia."""
+
+    def setUp(self):
+        self.lineas = leer(os.path.join(CARPETA, 'deploy.yml'))
+        self.on = secciones(self.lineas).get('on', [])
+
+    def test_push_a_main_incluye_la_pagina_de_reconocimientos_en_paths(self):
+        self.assertIn("      - 'reconocimientos-empresariales.html'", self.on)
+
+    def test_el_push_sigue_limitado_a_main(self):
+        self.assertIn('    branches: [main]', self.on)
+
+    def test_la_pagina_esta_junto_a_las_demas_paginas_del_sitio(self):
+        paths = [l.strip() for l in self.on if l.strip().startswith("- '")]
+        self.assertIn("- 'regalos-empresariales-fin-de-ano.html'", paths)
+        self.assertLess(paths.index("- 'regalos-empresariales-fin-de-ano.html'"),
+                        paths.index("- 'reconocimientos-empresariales.html'"))
+
+
 if __name__ == '__main__':
     unittest.main()

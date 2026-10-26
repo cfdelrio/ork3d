@@ -1297,7 +1297,7 @@ html.js [data-reveal].is-in {
 @media (max-width: 980px) {
   .hero--empresas { padding: 36px 0 96px; }
   /* En móvil el contacto lo da la barra fija y los CTA del hero: el botón flotante no compite con ellos. */
-  .pagina-regalos .wa-fab { display: none; }
+  .pagina-regalos .wa-fab, .pagina-reconocimientos .wa-fab { display: none; }
 }
 @media (max-width: 560px) {
   .hero--empresas .hero__title { font-size: 34px; }
@@ -1696,6 +1696,39 @@ html.js [data-reveal].is-in {
   #caso-real .caso-real__fotos { grid-area: fotos; width: 100%; margin: 0; }
   #caso-real .caso-real__detalles { grid-area: detalles; grid-template-rows: auto 1fr; align-self: stretch; }
   #caso-real .caso-real__cta { align-self: end; }
+}
+
+/* Página de reconocimientos empresariales (evergreen): identidad común + detalle único, y formatos. */
+.reco-conceptos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 28px;
+}
+@media (min-width: 900px) {
+  .reco-conceptos { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
+}
+.reco-conceptos li { border-top: 2px solid var(--color-black); padding-top: 18px; }
+.reco-conceptos h3 { margin: 0 0 8px; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+.reco-conceptos p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--text-dim); }
+.reco-formatos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 640px) {
+  .reco-formatos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.reco-formatos li {
+  padding: 18px 22px;
+  border: 1px solid rgba(25,25,25,0.2);
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-black);
 }
 
 /* Quote form (S6) */
