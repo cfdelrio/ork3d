@@ -1695,7 +1695,7 @@ html.js [data-reveal].is-in {
   #caso-real .caso-real__explicacion { grid-area: explicacion; }
   #caso-real .caso-real__fotos { grid-area: fotos; width: 100%; margin: 0; }
   #caso-real .caso-real__detalles { grid-area: detalles; grid-template-rows: auto 1fr; align-self: stretch; }
-  #caso-real .caso-real__cta { align-self: end; }
+  #caso-real .caso-real__cta { align-self: start; }
 }
 
 /* Página de reconocimientos empresariales (evergreen): identidad común + detalle único, y formatos. */
@@ -1730,6 +1730,16 @@ html.js [data-reveal].is-in {
   font-weight: 700;
   color: var(--color-black);
 }
+
+/* Ajustes visuales de la landing evergreen (solo #contacto-reconocimientos, #caso-real, #identidad-y-detalle y el hero
+   de reconocimientos). Ver el commit de mejora de jerarquía del hero. */
+.hero--reconocimientos .hero__title { font-size: clamp(34px, 4.8vw, 68px); }
+@media (max-width: 560px) {
+  .hero--reconocimientos .hero__badge { font-size: 11px; letter-spacing: 0.06em; }
+}
+#contacto-reconocimientos .hero__ctas { justify-content: center; }
+#identidad-y-detalle .reco-conceptos h3 { font-size: 24px; }
+#identidad-y-detalle .reco-conceptos p { font-size: 17px; }
 
 /* Quote form (S6) */
 .quote-form-wrap {

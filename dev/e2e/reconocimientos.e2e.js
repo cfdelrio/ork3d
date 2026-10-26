@@ -72,7 +72,8 @@ caso('la página existe con URL limpia, title, description, canonical y H1 únic
     afirmar((await page.locator('meta[name="robots"]').count()) === 0
       || !/noindex/i.test(await page.locator('meta[name="robots"]').getAttribute('content')), 'la página no debe ser noindex');
     afirmar(await page.locator('h1').count() === 1, 'debe haber un único H1');
-    afirmar((await page.locator('h1').innerText()).trim() === 'Reconocimientos empresariales personalizados', 'texto del H1');
+    afirmar((await page.locator('h1').innerText()).trim() === 'Reconocimientos diseñados para representar logros de verdad.', 'texto del H1');
+    afirmar((await page.locator('.hero__badge').innerText()).trim() === 'RECONOCIMIENTOS EMPRESARIALES PERSONALIZADOS', 'texto del eyebrow');
     afirmar(await page.locator('h2').count() >= 4, 'la página debe tener secciones con H2');
     afirmar(errores.length === 0, errores.join(' | '));
   } finally {
