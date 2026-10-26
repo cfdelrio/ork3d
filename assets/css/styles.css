@@ -1649,6 +1649,55 @@ html.js [data-reveal].is-in {
   .caso-real__acciones .btn { width: 100%; }
 }
 
+/* Caso real de la landing de regalos: video, explicación, foto del resultado, personalización y CTA.
+   Todas las reglas van con #caso-real para no tocar la sección equivalente de la home. */
+#caso-real .caso-real__explicacion .caso-real__cierre { margin: 0; font-size: 16px; font-weight: 600; }
+#caso-real .caso-real__fotos { width: min(100%, 280px); margin: 0 auto; }
+#caso-real .caso-real__foto {
+  margin: 0;
+  padding: 8px;
+  background: var(--color-cream);
+  border-radius: 22px;
+  box-shadow: 0 18px 40px rgba(25,25,25,0.16);
+}
+#caso-real .caso-real__foto picture,
+#caso-real .caso-real__foto img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 15px;
+}
+#caso-real .caso-real__foto-pie {
+  display: block;
+  margin-top: 12px;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-black);
+  text-align: center;
+}
+#caso-real .caso-real__detalles { display: grid; gap: 28px; margin-top: 8px; }
+#caso-real .caso-real__personalizacion .caso-real__chips { margin-top: 14px; }
+#caso-real .caso-real__cta .caso-real__micro { margin: 0 0 14px; }
+@media (min-width: 900px) {
+  #caso-real .caso-real__grid--pieza {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.6fr) minmax(0, 0.75fr);
+    grid-template-areas:
+      "figura explicacion explicacion"
+      "figura fotos detalles";
+    column-gap: 40px;
+    row-gap: 40px;
+    align-items: start;
+  }
+  #caso-real .caso-real__figura { grid-area: figura; align-self: center; }
+  #caso-real .caso-real__explicacion { grid-area: explicacion; }
+  #caso-real .caso-real__fotos { grid-area: fotos; width: 100%; margin: 0; }
+  #caso-real .caso-real__detalles { grid-area: detalles; grid-template-rows: auto 1fr; align-self: stretch; }
+  #caso-real .caso-real__cta { align-self: end; }
+}
+
 /* Quote form (S6) */
 .quote-form-wrap {
   max-width: 700px;
