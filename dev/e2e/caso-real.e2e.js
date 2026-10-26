@@ -256,6 +256,47 @@ for (const pagina of PAGINAS) {
   });
 }
 
+caso('landing de regalos: video, explicación, foto, personalización y CTA en ese orden, sin superposiciones y sin datos de la persona ni de la marca en el texto', async (browser) => {
+  for (const ancho of [390, 1440]) {
+    const { ctx, page, errores } = await abrir(browser, ancho, { ruta: PAGINAS[0].ruta });
+    try {
+      const sec = page.locator('#caso-real');
+      await sec.scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => {
+        const i = document.querySelector('#caso-real .caso-real__foto img');
+        return i && i.complete && i.naturalWidth > 0;
+      }, null, { timeout: 15000 });
+      const cajas = await page.evaluate(() => ['.caso-real__figura', '.caso-real__explicacion', '.caso-real__fotos', '.caso-real__detalles']
+        .map((s) => {
+          const r = document.querySelector('#caso-real ' + s).getBoundingClientRect();
+          return { s, x: r.left, y: r.top + scrollY, r: r.right, b: r.bottom + scrollY };
+        }));
+      if (ancho === 390) {
+        const ys = cajas.map((c) => c.y);
+        afirmar(ys.every((y, i) => i === 0 || y > ys[i - 1]), `orden de lectura en móvil incorrecto: ${ys}`);
+      }
+      for (let i = 0; i < cajas.length; i++) {
+        for (let j = i + 1; j < cajas.length; j++) {
+          const a = cajas[i];
+          const c = cajas[j];
+          const solapan = a.x < c.r && c.x < a.r && a.y < c.b && c.y < a.b;
+          afirmar(!solapan, `${a.s} se superpone con ${c.s} a ${ancho} px`);
+        }
+      }
+      // Sin nombres, montos ni marca del cliente en texto, alt ni etiquetas: el material visual sí los muestra.
+      const texto = await sec.evaluate((el) => [
+        el.innerText,
+        ...[...el.querySelectorAll('[alt], [aria-label]')].flatMap((e) => [e.getAttribute('alt'), e.getAttribute('aria-label')]),
+      ].filter(Boolean).join(' | '));
+      const datosSensibles = /Escobar|Gonzalo|Emprendimiento|PROHIT|\bHIT\b|50k|\$\s?50|SOY CAPAZ/i;
+      afirmar(!datosSensibles.test(texto), `datos de la persona o la marca en la sección: ${texto.match(datosSensibles)}`);
+      afirmar(errores.length === 0, errores.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  }
+});
+
 caso('ambas páginas usan el mismo archivo de video y la misma portada, sin duplicados', async (browser) => {
   const fuentesDe = async (ruta) => {
     const { ctx, page, errores } = await abrir(browser, 1280, { ruta });
