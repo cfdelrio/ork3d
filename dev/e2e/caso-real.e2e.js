@@ -30,19 +30,20 @@ const CHIPS = ['Nombre', 'Mensaje', 'Colores', 'Identidad de marca', 'Símbolos 
 const VIDEO_WEBM = '/assets/video/caso-real/reconocimiento-empresarial.webm';
 const VIDEO_MP4 = '/assets/video/caso-real/reconocimiento-empresarial.mp4';
 const PORTADA = '/assets/img/caso-real/reconocimiento-empresarial-poster.webp';
-const LANDING = '/regalos-empresariales-fin-de-ano';
+const RECONOCIMIENTOS = '/reconocimientos-empresariales';
 
 // Cada página del caso real. La home reemplaza el CTA de cotización por WhatsApp, que es su flujo comercial.
 const PAGINAS = [
   {
-    nombre: 'landing de regalos', ruta: '/regalos-empresariales-fin-de-ano.html', seccion: '#caso-real',
-    cta: { texto: 'Pedir una propuesta', href: '#cotizacion', track: 'caso_real_cta_click' },
+    // El caso completo vive en la landing evergreen. La landing de regalos solo tiene la versión breve.
+    nombre: 'reconocimientos', ruta: '/reconocimientos-empresariales.html', seccion: '#caso-real',
+    cta: { texto: 'Pedir una propuesta', whatsapp: true },
     secundario: { texto: 'Ver opiniones de clientes', href: '/opiniones' },
   },
   {
     nombre: 'home', ruta: '/', seccion: '#empresas',
     cta: { texto: 'Pedir una propuesta', whatsapp: true },
-    secundario: { texto: 'Ver soluciones para empresas', href: LANDING },
+    secundario: { texto: 'Ver reconocimientos empresariales', href: RECONOCIMIENTOS },
   },
 ];
 
@@ -256,6 +257,47 @@ for (const pagina of PAGINAS) {
   });
 }
 
+caso('reconocimientos: video, explicación, foto, personalización y CTA en ese orden, sin superposiciones y sin datos de la persona ni de la marca en el texto', async (browser) => {
+  for (const ancho of [390, 1440]) {
+    const { ctx, page, errores } = await abrir(browser, ancho, { ruta: PAGINAS[0].ruta });
+    try {
+      const sec = page.locator('#caso-real');
+      await sec.scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => {
+        const i = document.querySelector('#caso-real .caso-real__foto img');
+        return i && i.complete && i.naturalWidth > 0;
+      }, null, { timeout: 15000 });
+      const cajas = await page.evaluate(() => ['.caso-real__figura', '.caso-real__explicacion', '.caso-real__fotos', '.caso-real__detalles']
+        .map((s) => {
+          const r = document.querySelector('#caso-real ' + s).getBoundingClientRect();
+          return { s, x: r.left, y: r.top + scrollY, r: r.right, b: r.bottom + scrollY };
+        }));
+      if (ancho === 390) {
+        const ys = cajas.map((c) => c.y);
+        afirmar(ys.every((y, i) => i === 0 || y > ys[i - 1]), `orden de lectura en móvil incorrecto: ${ys}`);
+      }
+      for (let i = 0; i < cajas.length; i++) {
+        for (let j = i + 1; j < cajas.length; j++) {
+          const a = cajas[i];
+          const c = cajas[j];
+          const solapan = a.x < c.r && c.x < a.r && a.y < c.b && c.y < a.b;
+          afirmar(!solapan, `${a.s} se superpone con ${c.s} a ${ancho} px`);
+        }
+      }
+      // Sin nombres, montos ni marca del cliente en texto, alt ni etiquetas: el material visual sí los muestra.
+      const texto = await sec.evaluate((el) => [
+        el.innerText,
+        ...[...el.querySelectorAll('[alt], [aria-label]')].flatMap((e) => [e.getAttribute('alt'), e.getAttribute('aria-label')]),
+      ].filter(Boolean).join(' | '));
+      const datosSensibles = /Escobar|Gonzalo|Emprendimiento|PROHIT|\bHIT\b|50k|\$\s?50|SOY CAPAZ/i;
+      afirmar(!datosSensibles.test(texto), `datos de la persona o la marca en la sección: ${texto.match(datosSensibles)}`);
+      afirmar(errores.length === 0, errores.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  }
+});
+
 caso('ambas páginas usan el mismo archivo de video y la misma portada, sin duplicados', async (browser) => {
   const fuentesDe = async (ruta) => {
     const { ctx, page, errores } = await abrir(browser, 1280, { ruta });
@@ -277,31 +319,22 @@ caso('ambas páginas usan el mismo archivo de video y la misma portada, sin dupl
   afirmar(home.poster === PORTADA, `portada de la home: ${home.poster}`);
 });
 
-caso('la home enlaza la sección con #empresas y la landing de regalos responde', async (browser) => {
+caso('la home enlaza la sección con #empresas y la landing evergreen responde', async (browser) => {
   const { ctx, page, errores } = await abrir(browser, 1280, { ruta: '/' });
   try {
     const anclas = await page.locator('a[href="#empresas"]').count();
     afirmar(anclas >= 1, 'ningún enlace apunta a #empresas');
     afirmar(await page.locator('#empresas').count() === 1, 'el ancla #empresas no existe');
-    const r = await page.request.get(BASE + LANDING);
-    afirmar(r.status() === 200, `${LANDING} responde ${r.status()}`);
+    const enlace = page.locator('#empresas a.btn--ghost');
+    afirmar((await enlace.getAttribute('href')) === RECONOCIMIENTOS, 'la home debe enlazar a la landing evergreen');
+    const r = await page.request.get(BASE + RECONOCIMIENTOS);
+    afirmar(r.status() === 200, `${RECONOCIMIENTOS} responde ${r.status()}`);
     afirmar(errores.length === 0, errores.join(' | '));
   } finally {
     await ctx.close();
   }
 });
 
-caso('el CTA de la landing de regalos lleva a la cotización', async (browser) => {
-  const { ctx, page, errores } = await abrir(browser, 1280, { ruta: PAGINAS[0].ruta });
-  try {
-    await page.locator('#caso-real a.btn--primary').click();
-    await page.waitForFunction(() => location.hash === '#cotizacion');
-    afirmar(await page.locator('#cotizacion').isVisible(), 'la sección de cotización debe quedar visible');
-    afirmar(errores.length === 0, errores.join(' | '));
-  } finally {
-    await ctx.close();
-  }
-});
 
 async function main() {
   const servidor = await arrancarServidor();

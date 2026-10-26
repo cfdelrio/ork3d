@@ -34,7 +34,8 @@ GENERADOS = ['resenas/publicas.json',
 # /opiniones: lanzamiento de la página pública y su CSS/JS.
 OPINIONES = ['opiniones.html', 'assets/css/opiniones.css', 'assets/js/resenas-publicas.js']
 # Raíz del sitio: lo que el deploy tiene que subir siempre.
-SITIO_RAIZ = ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'error.html', 'opinar.html',
+SITIO_RAIZ = ['index.html', 'torneos.html', 'regalos-empresariales-fin-de-ano.html', 'reconocimientos-empresariales.html',
+              'error.html', 'opinar.html',
               'config.js', 'robots.txt', 'sitemap.xml']
 # Objetos hipotéticos de código fuera del sitio: no deben existir en el bucket; si existieran, no se tocan.
 CODIGO_FUERA = ['api/resenas/app.py', 'admin/resenas.sh', 'dev/serve.py', 'docs/resenas/README.md',
@@ -192,6 +193,12 @@ def auditar(texto, fuente, produccion):
     sitemap = [c for c in cmds if c['destino'].endswith('sitemap.xml')]
     if not sitemap or sitemap[0]['opciones'].get('cache-control') != CACHE_SITEMAP:
         problemas.append('sitemap.xml sin el cache-control de /opiniones')
+    # Cada página HTML de la raíz tiene su subida explícita con cabeceras de HTML (cache corta, charset UTF-8).
+    paginas = [k for k in SITIO_RAIZ if k.endswith('.html')]
+    sin_cp = [k for k in paginas if not any(c['sub'] == 'cp' and not c['recursivo']
+                                            and c['destino'].endswith('/' + k) for c in cmds)]
+    if sin_cp:
+        problemas.append(f'páginas del sitio sin subida explícita: {sin_cp}')
     return problemas
 
 
@@ -287,6 +294,20 @@ class DeployRealTest(unittest.TestCase):
         self.assertEqual(sitemap[0]['opciones']['cache-control'], CACHE_SITEMAP)
         self.assertEqual(sitemap[0]['opciones']['content-type'], 'application/xml; charset=utf-8')
 
+    def test_pagina_de_reconocimientos_tiene_subida_explicita_con_cabeceras_html(self):
+        cp = [c for c in comandos(self.texto) if c['sub'] == 'cp' and not c['recursivo']
+              and c['destino'].endswith('/reconocimientos-empresariales.html')]
+        self.assertEqual(len(cp), 1)
+        self.assertEqual(cp[0]['opciones']['cache-control'], 'public, max-age=60, must-revalidate')
+        self.assertEqual(cp[0]['opciones']['content-type'], 'text/html; charset=utf-8')
+
+    def test_pagina_de_reconocimientos_se_sube_y_no_se_borra(self):
+        todos = set()
+        for c in comandos(self.texto):
+            todos.update(subidos(c, self.fuente))
+        self.assertIn('reconocimientos-empresariales.html', todos)
+        self.assertNotIn('reconocimientos-empresariales.html', riesgo_residual(self.texto, self.fuente, self.produccion))
+
     def test_codigo_del_repo_no_se_sube_al_bucket(self):
         todos = set()
         for c in comandos(self.texto):
@@ -351,6 +372,23 @@ class MutacionesTest(unittest.TestCase):
                                         '  --cache-control "public, max-age=300" \\\n'
                                         '  --content-type "application/xml; charset=utf-8" \\\n'),
                      'sitemap.xml sin el cache-control')
+
+    def test_quitar_la_pagina_de_reconocimientos_del_deploy_se_detecta(self):
+        # Mutación: la página sale del deploy por las dos vías (exclusión del sync y sin subida explícita).
+        mutado = reemplazar_una_vez(self.texto, '  --exclude "dev/*" \\\n',
+                                    '  --exclude "dev/*" \\\n  --exclude "reconocimientos-empresariales.html" \\\n')
+        mutado = reemplazar_una_vez(mutado,
+                                    's3_sitio cp reconocimientos-empresariales.html "s3://${BUCKET}/reconocimientos-empresariales.html"',
+                                    'echo reconocimientos-empresariales.html "s3://${BUCKET}/reconocimientos-empresariales.html"')
+        self.detecta(mutado, 'páginas del sitio sin subida explícita')
+        self.detecta(mutado, 'no se suben archivos del sitio')
+
+    def test_quitar_solo_la_subida_explicita_de_reconocimientos_se_detecta(self):
+        # El sync la sigue subiendo, pero la auditoría exige la subida explícita con cabeceras de HTML.
+        mutado = reemplazar_una_vez(self.texto,
+                                    's3_sitio cp reconocimientos-empresariales.html "s3://${BUCKET}/reconocimientos-empresariales.html"',
+                                    'echo reconocimientos-empresariales.html "s3://${BUCKET}/reconocimientos-empresariales.html"')
+        self.detecta(mutado, 'páginas del sitio sin subida explícita')
 
 
 class DryRunTest(unittest.TestCase):
@@ -421,6 +459,111 @@ sys.exit(0)
         for llamada in real:
             self.assertNotIn('--delete', llamada)
             self.assertNotIn('rm', llamada[:3])
+
+
+FAKE_TRANSCRIPCION = '''#!/usr/bin/env python3
+# aws falso para el dry run: imprime lo que la CLI imprimiría con --dryrun. No llama a nada real.
+import fnmatch
+import json
+import os
+import sys
+
+FUENTE = json.loads(os.environ['FAKE_FUENTE'])
+BUCKET = os.environ['FAKE_BUCKET']
+
+
+def incluido(clave, filtros):
+    estado = True
+    for tipo, patron in filtros:
+        if fnmatch.fnmatchcase(clave, patron):
+            estado = tipo == 'include'
+    return estado
+
+
+def parsear(resto):
+    filtros, recursivo, dryrun = [], False, False
+    i = 0
+    while i < len(resto):
+        t = resto[i]
+        if t == '--recursive':
+            recursivo, i = True, i + 1
+        elif t == '--dryrun':
+            dryrun, i = True, i + 1
+        elif t in ('--exclude', '--include'):
+            filtros.append((t[2:], resto[i + 1]))
+            i += 2
+        else:
+            i += 2
+    return filtros, recursivo, dryrun
+
+
+args = sys.argv[1:]
+if args[:2] == ['s3', 'sync']:
+    origen, destino = args[2], args[3]
+    filtros, _, dryrun = parsear(args[4:])
+    prefijo = '(dryrun) ' if dryrun else ''
+    for k in FUENTE:
+        if incluido(k, filtros):
+            print(f'{prefijo}upload: {k} to s3://{BUCKET}/{k}')
+elif args[:2] == ['s3', 'cp']:
+    origen, destino = args[2], args[3]
+    filtros, recursivo, dryrun = parsear(args[4:])
+    prefijo = '(dryrun) ' if dryrun else ''
+    if recursivo:
+        base = origen.rstrip('/') + '/'
+        for k in FUENTE:
+            if k.startswith(base) and incluido(k[len(base):], filtros):
+                print(f'{prefijo}upload: {k} to s3://{BUCKET}/{k}')
+    else:
+        clave = destino.split('${BUCKET}')[-1].split(BUCKET)[-1].lstrip('/') or destino
+        print(f'{prefijo}upload: {origen} to s3://{BUCKET}/{clave}')
+elif args[:2] == ['cloudfront', 'create-invalidation']:
+    print('IFAKE123')
+sys.exit(0)
+'''
+
+
+class TranscripcionDryRunTest(unittest.TestCase):
+    """Transcripción del dry run del sitio con un aws falso: sube la página nueva y no borra ni toca el panel ni resenas/."""
+
+    @classmethod
+    def setUpClass(cls):
+        d = tempfile.mkdtemp(prefix='transcripcion-dry-')
+        cls.addClassCleanup(shutil.rmtree, d, True)
+        shutil.copy(DEPLOY, os.path.join(d, 'deploy.sh'))
+        aws = os.path.join(d, 'bin', 'aws')
+        os.makedirs(os.path.dirname(aws))
+        with open(aws, 'w', encoding='utf-8') as f:
+            f.write(FAKE_TRANSCRIPCION)
+        os.chmod(aws, 0o755)
+        env = dict(os.environ, PATH=os.path.dirname(aws) + os.pathsep + os.environ.get('PATH', ''),
+                   BUCKET='ork3d.com', DISTRIBUTION_ID='EFAKE', DEPLOY_DRY_RUN='1',
+                   FAKE_FUENTE=json.dumps(fuente_del_repo()), FAKE_BUCKET='ork3d.com')
+        r = subprocess.run(['bash', os.path.join(d, 'deploy.sh')], env=env, cwd=d, capture_output=True,
+                           text=True, timeout=120)
+        cls.codigo = r.returncode
+        cls.salida = r.stdout + r.stderr
+        cls.lineas = [l for l in r.stdout.splitlines() if 'upload:' in l or l.startswith('(dryrun) delete')]
+
+    def test_el_dry_run_termina_bien_y_no_invalida(self):
+        self.assertEqual(self.codigo, 0, self.salida)
+        self.assertNotIn('create-invalidation', self.salida)
+
+    def test_el_dry_run_sube_la_pagina_de_reconocimientos(self):
+        self.assertIn('(dryrun) upload: reconocimientos-empresariales.html to s3://ork3d.com/reconocimientos-empresariales.html',
+                      self.lineas)
+
+    def test_el_dry_run_no_lista_borrados(self):
+        self.assertEqual([l for l in self.lineas if l.startswith('(dryrun) delete')], [])
+
+    def test_el_dry_run_no_lista_panel_admin_ni_resenas(self):
+        prohibidos = ('admin-web/', 'assets/css/admin.css', 'assets/js/admin-', 'resenas/publicas.json', 'resenas/fotos')
+        self.assertEqual([l for l in self.lineas if any(p in l for p in prohibidos)], [])
+
+    def test_el_dry_run_sigue_subiendo_opiniones_y_la_raiz(self):
+        for clave in ('opiniones.html', 'index.html', 'regalos-empresariales-fin-de-ano.html', 'sitemap.xml'):
+            with self.subTest(clave=clave):
+                self.assertIn(f'(dryrun) upload: {clave} to s3://ork3d.com/{clave}', self.lineas)
 
 
 if __name__ == '__main__':

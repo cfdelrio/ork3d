@@ -39,6 +39,7 @@ capa "Browser E2E /opiniones: estados, SEO, móvil, accesibilidad y contraste (C
 capa "Browser E2E foto ampliada en la home: pantalla completa, teclado, cierre y fallback (Chromium)" node dev/e2e/lightbox.e2e.js
 capa "Browser E2E caso real en regalos: video silenciado, reproducción única, reducción de movimiento, CLS y responsive (Chromium)" node dev/e2e/caso-real.e2e.js
 capa "Browser E2E hero de la landing de regalos: textos, CTA, desborde en 6 anchos, contraste AA y contacto flotante (Chromium)" node dev/e2e/regalos-hero.e2e.js
+capa "Browser E2E landing evergreen de reconocimientos: SEO, canonical, sitemap, enlaces, FAQ y privacidad (Chromium)" node dev/e2e/reconocimientos.e2e.js
 capa "Validaciones HTML/JS/shell/JSON/IAM" python3 dev/validar.py
 
 rm -rf api/resenas/__pycache__ api/resenas/nucleo/__pycache__ dev/__pycache__ admin/tests/__pycache__ infra/tests/__pycache__
