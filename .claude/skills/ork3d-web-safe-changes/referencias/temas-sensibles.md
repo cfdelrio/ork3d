@@ -12,7 +12,7 @@ Estos textos están aprobados. Si cambian, avisá antes:
 | Landing de reconocimientos (eyebrow) | "RECONOCIMIENTOS EMPRESARIALES PERSONALIZADOS" |
 | Landing de reconocimientos (H1) | "Reconocimientos diseñados para representar logros de verdad." |
 | Landing de reconocimientos (title) | "Reconocimientos empresariales personalizados \| ORK3D" |
-| Beneficios del hero (landing de regalos y de reconocimientos) | "Respuesta rápida", "Sin grandes pedidos mínimos", "Personalización individual" |
+| Beneficios del hero (regalos y reconocimientos) | "Respuesta rápida", "Sin grandes pedidos mínimos", "Personalización individual" |
 | CTA principal | "Pedir una propuesta" |
 
 ## 2. Promesas comerciales
